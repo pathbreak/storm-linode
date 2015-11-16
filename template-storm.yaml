@@ -1,0 +1,25 @@
+# See https://github.com/apache/storm/blob/master/conf/defaults.yaml for list of all available
+# configuration options.
+
+# The directory where storm stores topology JARs.
+# Modifiable before creating cluster: YES
+# Modifiable after creating cluster: NO
+storm.local.dir: "/var/lib/storm"
+
+# The directory where storm stores its logs.
+# Modifiable before creating cluster: YES
+# Modifiable after creating cluster: NO
+storm.log.dir: "/var/log/storm"  
+
+# Root zookeeper znode for all topologies
+# Modifiable before creating cluster: YES
+# Modifiable after creating cluster: YES
+storm.zookeeper.root: "/$CLUSTER_NAME"
+
+# Root zookeeper znode for trident's transactional spouts
+# Modifiable before creating cluster: YES
+# Modifiable after creating cluster: YES
+transactional.zookeeper.root: "/tx-$CLUSTER_NAME" 
+
+
+

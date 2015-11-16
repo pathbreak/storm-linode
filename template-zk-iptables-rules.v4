@@ -1,0 +1,20 @@
+*filter
+# Set default policies to DROP, except for output traffic generated from the node itself.
+# All traffic over public IP address should get dropped, unless one of the below rules
+# overrides it.
+:INPUT DROP [0:0]
+:FORWARD DROP [0:0]
+:OUTPUT ACCEPT [0:0]
+
+# All localhost traffic is ok
+-A INPUT -i lo -j ACCEPT
+
+# allow traffic from other zk nodes as well as other whitelisted clusters
+-A INPUT -m set --match-set all-whitelists src -j ACCEPT
+
+# allow traffic like DNS lookups initiated from the machine
+-A INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
+
+# allow SSH 
+-A INPUT -p tcp -m tcp --dport 22 -j ACCEPT
+COMMIT
