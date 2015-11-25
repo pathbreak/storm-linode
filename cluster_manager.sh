@@ -107,7 +107,7 @@ setup_cluster_manager() {
 	apt-get -y update
 	apt-get -y upgrade
 	
-	apt-get -y install bash git python ssh wget
+	apt-get -y install git python2.7 ssh wget
 	
 	# Create the 'clustermgr' user for running scripts.
 	# It should be part of sudo because script should modify /etc/hosts of cluster manager node
@@ -215,6 +215,6 @@ case $1 in
 	;;
 
 	setup)
-	setup_cluster_manager $2
+	setup_cluster_manager
 	;;
 esac
