@@ -16,6 +16,7 @@ API_PRODUCTION_URL = 'https://api.linode.com/'
 API_SIMULATOR_URL = 'http://localhost:5000/'
 api_key = None
 url = API_SIMULATOR_URL
+LOG = False
 
 def linode_request(action, params):
 	data={
@@ -29,7 +30,8 @@ def linode_request(action, params):
 	response = urllib2.urlopen(req)
 	response = response.read()	
 	respobj = json.loads(response)
-	log(req, respobj)
+	if LOG:
+		log(req, respobj)
 	return respobj
 
 
@@ -96,7 +98,6 @@ def list_distributions(filter=None, format='raw'):
 	data=linode_request('avail.distributions', None)
 	distros=data['DATA']
 	if filter and filter is not '':
-		print "in filtering block"
 		filter=filter.lower()
 		filtered=list()
 		for distro in distros:
@@ -172,8 +173,7 @@ def list_kernels(version_filter_regex=None, format='raw'):
 	if version_filter_regex and version_filter_regex is not '':
 		filtered=list()
 		for kernel in kernels:
-			# Use re.match since we want to check only start of the version strings.
-			if re.match(version_filter_regex, kernel['LABEL']):
+			if re.search(version_filter_regex, kernel['LABEL']):
 				filtered.append(kernel)
 		kernels = filtered
 		
@@ -211,11 +211,23 @@ def find_kernel(kernel):
 
 
 
-def list_nodes():
-	data=linode_request('linode.list', None)
+def list_nodes(linode_id=None):
+	if linode_id:
+		data=linode_request('linode.list', {'LinodeID':linode_id})
+	else:
+		data=linode_request('linode.list', None)
+		
 	nodes=data['DATA']
 	print json.dumps(nodes, indent=4, separators=(',',':'))
 
+
+def get_node_memory(linode_id):
+	resp = linode_request('linode.list', {'LinodeID':linode_id})
+	nodes = resp['DATA']
+	if nodes and len(nodes) > 0:
+		return nodes[0]["TOTALRAM"]
+		
+	return None
 
 
 def list_jobs(linode_id):
@@ -666,9 +678,21 @@ elif (cmd == 'plans'):
 		list_plans()
 
 elif (cmd == 'nodes'):
-	list_nodes()
+	if len(sys.argv) >= 3:
+		list_nodes(int(sys.argv[2]))
+	else:
+		list_nodes()
 
 
+elif (cmd == 'ram'):
+	mem = get_node_memory(int(sys.argv[2]))
+	if mem is None:
+		print >> sys.stderr, "Unable to get memory for linode:", sys.argv[2]
+		sys.exit(1)
+		
+	print mem
+	sys.exit(0)
+	
 elif (cmd == 'distributions'):
 	filter = None
 	if len(sys.argv) > 2:
