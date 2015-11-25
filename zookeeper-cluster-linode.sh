@@ -191,7 +191,7 @@ create_zk_image() {
 
 	#echo "Installing Zookeeper software"
 	install_zookeeper_on_node $ipaddr $NODE_USERNAME
-	
+
 	# Shutdown the linode.
 	echo "Shutting down the linode"
 	linode_api linout linerr linret "shutdown" $temp_linode_id
@@ -1131,9 +1131,24 @@ install_zookeeper_on_node() {
 	remote_copyfile "$IMAGE_CONF_DIR/zoo.cfg" $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY $remote_cfg_path
 	
 	# Create java.env with JVM heap settings in installation directory.
+	# If the values are percentages, then they are dynamically calculated later on at cluster
+	# creation time based on the individual node's plan. Since java.env should not be invalid and Xm values
+	# can't be percentages, set them to a default value of 768M (which is 75% of the lowest linode 1GB RAM plan).
 	# The single quotes around $JVMFLAGS is to ensure that JVMFLAGS value remains enclosed in single quotes "-Xms -Xmx"
-	# Otherwise, it an error -Xmx is unknown command, due to the prior space.
-	local java_env_contents="export JVMFLAGS=\'-Xms$ZOOKEEPER_MIN_HEAP_SIZE -Xmx$ZOOKEEPER_MAX_HEAP_SIZE\'"
+	# Otherwise, it gives an error "-Xmx is unknown command" due to the space char in the middle.
+	local min_heap="$ZOOKEEPER_MIN_HEAP_SIZE"
+	local min_heap_value="$(echo $min_heap | tr -d '%kKmMgG')"
+	local min_heap_units="$(echo $min_heap | tr -d '[:digit:]')"
+	local max_heap="$ZOOKEEPER_MAX_HEAP_SIZE"
+	local max_heap_value="$(echo $max_heap | tr -d '%kKmMgG')"
+	local max_heap_units="$(echo $max_heap | tr -d '[:digit:]')"
+	if [ "$min_heap_units" == "%" ]; then 
+		min_heap="768M"
+	fi
+	if [ "$max_heap_units" == "%" ]; then 
+		max_heap="768M"
+	fi
+	local java_env_contents="export JVMFLAGS=\'-Xms$min_heap -Xmx$max_heap\'"
 	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY "sudo sh -c \"echo $java_env_contents > $install_dir/conf/java.env\""
 
 	# ZK logging is seriously screwed up.
@@ -1259,6 +1274,26 @@ distribute_zk_configuration() {
 
 	local cluster_cfg="$CLUSTER_CONF_DIR/zoo.cfg"
 	
+	# In addition to zoo.cfg, if the image conf specified min/max heap sizes
+	# as percentages, we have to dynamically create $install_dir/conf/java.env
+	# on each node based on that node's memory.
+	local img_min_heap="$ZOOKEEPER_MIN_HEAP_SIZE"
+	local img_max_heap="$ZOOKEEPER_MAX_HEAP_SIZE"
+	local img_min_heap_units="$(echo $img_min_heap|tr -d '[:digit:]')"
+	local img_min_heap_value="$(echo $img_min_heap|tr -d '%kKmMgG')"
+	local img_max_heap_units="$(echo $img_max_heap|tr -d '[:digit:]')"
+	local img_max_heap_value="$(echo $img_max_heap|tr -d '%kKmMgG')"
+	local calc_min_heap=0
+	if [ "$img_min_heap_units" == "%" ]; then
+		calc_min_heap=1
+	fi
+	local calc_max_heap=0
+	if [ "$img_max_heap_units" == "%" ]; then
+		calc_max_heap=1
+	fi
+
+	local linout linerr linret
+	
 	# Now we need the ZK installation directory on a node.
 	local install_dir=$(zk_install_dir)
 	local remote_cfg_path=$install_dir/conf/zoo.cfg
@@ -1276,6 +1311,30 @@ distribute_zk_configuration() {
 
 		echo "Copying $cluster_cfg to node $linode_id [$target_ip] $remote_cfg_path..."
 		remote_copyfile $cluster_cfg $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY $remote_cfg_path
+		
+		if [ $calc_min_heap -eq 1 -o $calc_max_heap -eq 1 ]; then
+			linode_api linout linerr linret "ram" $linode_id
+			if [ $linret -eq 1 ]; then
+				# It's not a fatal error, because the image has a valid heap size.
+				echo "Failed to get RAM of linode $linode_id. Heap settings are unchanged. Error:$linerr"
+				continue
+			fi
+			local ram=$linout
+			local min_heap=$img_min_heap
+			if [ $calc_min_heap -eq 1 ]; then
+				# This is always an integer division. min_heap will be in bytes
+				min_heap=$((ram * img_min_heap_value / 100))
+			fi
+			local max_heap=$img_max_heap
+			if [ $calc_max_heap -eq 1 ]; then
+				# This is always an integer division. max_heap will be in bytes.
+				max_heap=$((ram * img_max_heap_value / 100))
+			fi
+			
+			local java_env_contents="export JVMFLAGS=\'-Xms$min_heap -Xmx$max_heap\'"
+			ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "sudo sh -c \"echo $java_env_contents > $install_dir/conf/java.env\""
+		fi
+		
 	done <<< "$ipaddrs"
 }
 
@@ -1469,6 +1528,16 @@ add_to_whitelist() {
 
 	
 	local stfile=$(status_file)
+	if [ ! -f "$stfile" ]; then
+		echo "Zookeeper cluster does not exist. Aborting"
+		return 1
+	fi
+	
+	local cluster_status=$(get_cluster_status)
+	if [[ "$cluster_status" != "running" && "$cluster_status" != "created"  && "$cluster_status" != "stopped" ]]; then
+		echo "Zookeeper cluster should be created, running or stopped to add to its whitelist. Aborting"
+		return 1
+	fi
 	
 	add_section $stfile "whitelisted-clusters"
 	
@@ -1484,7 +1553,6 @@ add_to_whitelist() {
 	
 	# When should this configuration be applied? If cluster is running,
 	# it should be applied immediately, otherwise at next startup.
-	local cluster_status=$(get_cluster_status)
 	if [ "$cluster_status" == "running" ]; then
 		distribute_cluster_security_configurations $CLUSTER_NAME
 		update_security_status "unchanged"
@@ -1511,6 +1579,17 @@ remove_from_whitelist() {
 
 	
 	local stfile=$(status_file)
+	if [ ! -f "$stfile" ]; then
+		echo "Zookeeper cluster does not exist. Aborting"
+		return 1
+	fi
+	
+	local cluster_status=$(get_cluster_status)
+	if [[ "$cluster_status" != "running" && "$cluster_status" != "created"  && "$cluster_status" != "stopped" ]]; then
+		echo "Zookeeper cluster should be created, running or stopped to remove from its whitelist. Aborting"
+		return 1
+	fi
+	
 	
 	delete_line $stfile "whitelisted-clusters" "$2"
 
