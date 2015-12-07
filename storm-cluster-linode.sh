@@ -252,7 +252,7 @@ create_storm_image() {
 	
 	# delete temporary linode. 'skipchecks' is 1 (true) because it's much 
 	# easier than detaching disk from config and then deleting.
-	echo "Deleting the temporary linode"
+	echo "Deleting the temporary linode $temp_linode_id"
 	linode_api linout linerr linret "delete-node" $temp_linode_id 1
 	if [ $linret -eq 1 ]; then
 		echo "Failed to delete temporary linode. Error:$linerr"
