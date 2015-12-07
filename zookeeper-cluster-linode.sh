@@ -242,7 +242,7 @@ create_zk_image() {
 	
 	# delete temporary linode. 'skipchecks' is 1 (true) because it's much 
 	# easier than detaching disk from config and then deleting.
-	echo "Deleting the temporary linode"
+	echo "Deleting the temporary linode $temp_linode_id"
 	linode_api linout linerr linret "delete-node" $temp_linode_id 1
 	if [ $linret -eq 1 ]; then
 		echo "Failed to delete temporary linode. Error:$linerr"
@@ -1319,19 +1319,21 @@ distribute_zk_configuration() {
 				echo "Failed to get RAM of linode $linode_id. Heap settings are unchanged. Error:$linerr"
 				continue
 			fi
+			
+			# The RAM value is in MB.
 			local ram=$linout
 			local min_heap=$img_min_heap
 			if [ $calc_min_heap -eq 1 ]; then
-				# This is always an integer division. min_heap will be in bytes
+				# This is always an integer division. min_heap will be in MB.
 				min_heap=$((ram * img_min_heap_value / 100))
 			fi
 			local max_heap=$img_max_heap
 			if [ $calc_max_heap -eq 1 ]; then
-				# This is always an integer division. max_heap will be in bytes.
+				# This is always an integer division. max_heap will be in MB.
 				max_heap=$((ram * img_max_heap_value / 100))
 			fi
 			
-			local java_env_contents="export JVMFLAGS=\'-Xms$min_heap -Xmx$max_heap\'"
+			local java_env_contents="export JVMFLAGS=\'-Xms${min_heap}M -Xmx${max_heap}M\'"
 			ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "sudo sh -c \"echo $java_env_contents > $install_dir/conf/java.env\""
 		fi
 		
