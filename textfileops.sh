@@ -13,8 +13,7 @@ SECTION_END_PREFIX='#END:'
 # 	$2 : Section name
 add_section() {
 	is_section_present $1 $2
-	local is_present=$?
-	if [ $is_present -eq 0 ]; then
+	if [ $? -eq 0 ]; then
 		echo "Section $2 already exists"
 		return 1
 	fi
@@ -31,8 +30,7 @@ add_section() {
 # 	$2 : Section name
 delete_section() {
 	is_section_present $1 $2
-	local is_present=$?
-	if [ $is_present -ne 0 ]; then
+	if [ $? -ne 0 ]; then
 		echo "Section $2 not found"
 		return 1
 	fi
@@ -49,8 +47,7 @@ delete_section() {
 #	$3: Line to insert
 insert_top_of_section() {
 	is_section_present $1 $2
-	local is_present=$?
-	if [ $is_present -ne 0 ]; then
+	if [ $? -ne 0 ]; then
 		echo "Section $2 not found"
 		return 1
 	fi
@@ -69,8 +66,7 @@ insert_top_of_section() {
 #	$3: Line to insert
 insert_bottom_of_section() {
 	is_section_present $1 $2
-	local is_present=$?
-	if [ $is_present -ne 0 ]; then
+	if [ $? -ne 0 ]; then
 		echo "Section $2 not found"
 		return 1
 	fi
@@ -90,8 +86,7 @@ insert_bottom_of_section() {
 #	$4: Replacement line
 replace_line() {
 	is_section_present $1 $2
-	local is_present=$?
-	if [ $is_present -ne 0 ]; then
+	if [ $? -ne 0 ]; then
 		echo "Section $2 not found"
 		return 1
 	fi
@@ -104,7 +99,11 @@ replace_line() {
 	# The \\$4 is because if $4 starts with whitespaces but there is no \ before it, those whitespaces are not written to file.
 	# The double backslash is because a single backslash is escape character for bash. We want to escape the backslash itself so 
 	# that it gets passed as a backslash to sed.
-	sed -r -i "/$header/,/$footer/ {/$3/ c \\$4 
+	#sed -r -i "/$header/,/$footer/ {/$3/ c \\$4 
+	#	}" $1
+	# The /$3/ is changed to \|$3| - ie, the sed delimiter is changed from / to |
+	# because $3 may itself contain / (slashes)
+	sed -r -i "/$header/,/$footer/ {\|$3| c \\$4 
 		}" $1
 }
 
@@ -150,8 +149,7 @@ replace_section_with_file() {
 #	$3: Pattern to delete
 delete_line() {
 	is_section_present $1 $2
-	local is_present=$?
-	if [ $is_present -ne 0 ]; then
+	if [ $? -ne 0 ]; then
 		echo "Section $2 not found"
 		return 1
 	fi
