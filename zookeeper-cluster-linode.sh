@@ -192,6 +192,8 @@ create_zk_image() {
 	#echo "Installing Zookeeper software"
 	install_zookeeper_on_node $ipaddr $NODE_USERNAME
 
+	return 
+	
 	# Shutdown the linode.
 	echo "Shutting down the linode"
 	linode_api linout linerr linret "shutdown" $temp_linode_id
@@ -633,7 +635,7 @@ create_new_nodes() {
 			# Create a disk from distribution.
 			echo "Creating disk from Zookeeper image for linode $linode_id"
 			linode_api linout linerr linret "create-disk-from-image" $linode_id $image_id \
-				"Zookeeper" $NODE_DISK_SIZE "$NODE_ROOT_PASSWORD" "$NODE_ROOT_SSH_KEY"
+				"Zookeeper" $NODE_DISK_SIZE "$NODE_ROOT_PASSWORD" "$NODE_ROOT_SSH_PUBLIC_KEY"
 				
 			if [ $linret -eq 1 ]; then
 				echo "Failed to create image. Error:$linerr"
@@ -989,6 +991,36 @@ distribute_hostsfile() {
 
 # $1 : IP address of node
 setup_users_and_authentication_for_image() {
+	# Enable or disable password authentication for ssh.
+	if [ "$IMAGE_DISABLE_SSH_PASSWORD_AUTHENTICATION" == "yes" ];  then
+		echo "Disabling SSH password authentication"
+		
+		ssh_command $1 $NODE_USERNAME $IMAGE_ROOT_SSH_PRIVATE_KEY "sh -c
+			\"grep -q 'PasswordAuthentication yes$\|PasswordAuthentication no$' /etc/ssh/sshd_config; 
+			if [ $? -eq 1 ]; then 
+				echo 'PasswordAuthentication no' >> /etc/ssh/sshd_config ;
+			else 
+				sed -r -i '/PasswordAuthentication yes$|PasswordAuthentication no$/ c PasswordAuthentication no' /etc/ssh/sshd_config ;
+			fi\""
+		
+		ssh_command $1 $NODE_USERNAME $IMAGE_ROOT_SSH_PRIVATE_KEY "service ssh restart"
+		
+	elif [ "$IMAGE_DISABLE_SSH_PASSWORD_AUTHENTICATION" == "no" ];  then
+		echo "Enabling SSH password authentication"
+		
+		ssh_command $1 $NODE_USERNAME $IMAGE_ROOT_SSH_PRIVATE_KEY "sh -c
+			\"grep -q 'PasswordAuthentication yes$\|PasswordAuthentication no$' /etc/ssh/sshd_config; 
+			if [ $? -eq 1 ]; then 
+				echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config ;
+			else 
+				sed -r -i '/PasswordAuthentication yes$|PasswordAuthentication no$/ c PasswordAuthentication yes' /etc/ssh/sshd_config ;
+			fi\""
+		
+		ssh_command $1 $NODE_USERNAME $IMAGE_ROOT_SSH_PRIVATE_KEY "service ssh restart"
+			
+	else
+		echo "Unknown value '$IMAGE_DISABLE_SSH_PASSWORD_AUTHENTICATION' for IMAGE_DISABLE_SSH_PASSWORD_AUTHENTICATION. Leaving defaults unchanged."
+	fi
 	
 	# Create IMAGE_ADMIN_USER as part of sudo group with password IMAGE_ADMIN_PASSWORD
 	if [ ! -z "$IMAGE_ADMIN_USER" ];  then
@@ -1901,6 +1933,13 @@ validate_image_configuration() {
 	elif [ ! -f "$IMAGE_ROOT_SSH_PRIVATE_KEY" ]; then
 		echo "Validation error: IMAGE_ROOT_SSH_PRIVATE_KEY should be the path of an SSH private key file (example: $HOME/.ssh/id_rsa)"
 		invalid=1
+	fi
+	
+	if [ ! -z "$IMAGE_DISABLE_SSH_PASSWORD_AUTHENTICATION" ]; then
+		if [[ "$IMAGE_DISABLE_SSH_PASSWORD_AUTHENTICATION" != "yes" && "$IMAGE_DISABLE_SSH_PASSWORD_AUTHENTICATION" != "no" ]]; then
+			echo "Validation error: IMAGE_DISABLE_SSH_PASSWORD_AUTHENTICATION should be yes or no"
+			invalid=1
+		fi
 	fi
 	
 	if [ -z "$ZOOKEEPER_USER" ]; then
