@@ -22,7 +22,7 @@
 -A INPUT -p tcp -m tcp --dport 22 -j ACCEPT
 
 # Allow access to storm-ui web app on port 80 only to whitelisted ipsets.
--A INPUT -m set --match-set $CLUSTER_NAME-uwls src -j ACCEPT
+-A INPUT -p tcp -m tcp --dport 80 -m set --match-set $CLUSTER_NAME-uwls src -j ACCEPT
 # If you wish instead to allow anybody to access port 80, comment the above rule and uncomment the below one:
 #-A INPUT -p tcp -m tcp --dport 80 -j ACCEPT
 COMMIT
