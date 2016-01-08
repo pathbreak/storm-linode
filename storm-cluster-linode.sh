@@ -74,6 +74,8 @@ create_new_image_conf() {
 	cp storm-image-example.conf "$1/$1.conf"
 	cp template-storm.yaml "$1/"
 	cp template-storm-supervisord.conf "$1/"
+	
+	chmod go-rwx $1/*
 }
 
 
@@ -273,6 +275,7 @@ create_new_cluster_conf() {
 	mkdir -p "$1"
 	
 	cp storm-cluster-example.conf "$1/$1.conf"
+	chmod go-rwx "$1/$1.conf"
 }
 
 
@@ -630,8 +633,8 @@ create_supervisor_nodes() {
 
 	local total_sup_count=1
 	for i in $2; do
-		plan=$(echo $i|cut -d ':' -f1)
-		count=$(echo $i|cut -d ':' -f2)
+		local plan=$(echo $i|cut -d ':' -f1)
+		local count=$(echo $i|cut -d ':' -f2)
 		
 		local plan_id
 		get_plan_id $plan
@@ -1121,7 +1124,7 @@ set_hostname() {
 	ssh_command $target_ip $5 $NODE_ROOT_SSH_PRIVATE_KEY sudo sh hostname_manager.sh "change-hostname" $6 $2 $1 $4 $3
 
 	check_hostname=$(ssh_command $target_ip $5 $NODE_ROOT_SSH_PRIVATE_KEY hostname)
-	if [ $check_hostname == $1 ]; then
+	if [ "x$check_hostname" == "x$1" ]; then
 		echo "Verified new hostname"
 		return 0
 	fi
@@ -1143,6 +1146,7 @@ distribute_hostsfile() {
 
 	local hostsfile="$CLUSTER_CONF_DIR/$1.hosts"
 	touch $hostsfile
+	chmod go-rwx $hostsfile
 	# Empty host file if it exists.
 	> $hostsfile
 
@@ -1435,6 +1439,7 @@ create_storm_configuration() {
 		storm_yaml_template=$(readlink -m "$IMAGE_CONF_DIR/$STORM_YAML_TEMPLATE")
 	fi
 	cp $storm_yaml_template $cluster_cfg
+	chmod go-rwx $cluster_cfg
 
 	# Substitute actual cluster name in the zookeeper znode paths
 	sed -i "s/\$CLUSTER_NAME/$CLUSTER_NAME/g" $cluster_cfg
@@ -1931,6 +1936,7 @@ configure_client_reverse_proxy() {
 	# Create "stormproxy.conf" with reverse proxy and substitution configuration.
 	local storm_proxy_conf="$CLUSTER_CONF_DIR/$CLUSTER_NAME-stormproxy.conf"
 	cp template-stormproxy.conf $storm_proxy_conf
+	chmod go-rwx $storm_proxy_conf
 	local ui_port=$(get_ui_port)
 	sed -i "s/\$STORMUIPORT/$ui_port/g" $storm_proxy_conf
 
@@ -2010,6 +2016,7 @@ create_cluster_security_configurations() {
 	local storm_cluster_whitelist_file="$CLUSTER_CONF_DIR/$CLUSTER_NAME-whitelist.ipsets"
 	local storm_cluster_whitelist_name="$CLUSTER_NAME-wl"
 	echo "create $storm_cluster_whitelist_name hash:ip family inet hashsize 1024 maxelem 65536" > $storm_cluster_whitelist_file
+	chmod go-rwx $storm_cluster_whitelist_file
 	local ipaddrs=$(get_section $stfile "ipaddresses")
 	while read ipentry 
 	do
@@ -2027,6 +2034,8 @@ create_cluster_security_configurations() {
 	local ipsets_file_for_all_nodes="$CLUSTER_CONF_DIR/$CLUSTER_NAME-rules.ipsets"
 	cat $storm_cluster_whitelist_file $zk_cluster_whitelist_file > $ipsets_file_for_all_nodes
 	
+	chmod go-rwx $ipsets_file_for_all_nodes
+	
 	# The client user whitelist file contains user editable whitelists of users who're allowed
 	# to access the web UI interface on client node.
 	# Admin can create any kind of ipsets here, and should add those ipsets to the 
@@ -2036,6 +2045,8 @@ create_cluster_security_configurations() {
 	# Since this is a user-editable file, we don't want to overwrite it if it already exixts.
 	if [ ! -f "$storm_client_user_whitelist_file" ]; then
 		> $storm_client_user_whitelist_file
+		chmod go-rwx $storm_client_user_whitelist_file
+		
 		printf "# Create custom ipsets based on your needs, include them under master whitelist $CLUSTER_NAME-uwls\n" >> $storm_client_user_whitelist_file
 		printf "# and finally run ./storm-cluster-linode.sh update-user-whitelist <CLUSTER-CONF-FILE>\n\n" >> $storm_client_user_whitelist_file
 		echo "# Example 1: An ipset that whitelists IP addresses:" >> $storm_client_user_whitelist_file
@@ -2054,6 +2065,7 @@ create_cluster_security_configurations() {
 
 	local ipsets_file_for_client_node="$CLUSTER_CONF_DIR/$CLUSTER_NAME-client-rules.ipsets"
 	cat $storm_cluster_whitelist_file $zk_cluster_whitelist_file $storm_client_user_whitelist_file > $ipsets_file_for_client_node
+	chmod go-rwx $ipsets_file_for_client_node
 	
 	local template_v4_rules=$IPTABLES_V4_RULES_TEMPLATE
 	if [ ${template_v4_rules:0:1} != "/" ]; then
@@ -2061,6 +2073,7 @@ create_cluster_security_configurations() {
 	fi
 	local storm_iptables_v4_rules_file="$CLUSTER_CONF_DIR/$CLUSTER_NAME-rules.v4"
 	cp $template_v4_rules $storm_iptables_v4_rules_file
+	chmod go-rwx $storm_iptables_v4_rules_file
 	sed -i "s/\$CLUSTER_NAME/$CLUSTER_NAME/g" $storm_iptables_v4_rules_file
 	sed -i "s/\$ZK_CLUSTER_NAME/$zkcluster_name/g" $storm_iptables_v4_rules_file
 
@@ -2070,6 +2083,7 @@ create_cluster_security_configurations() {
 	fi
 	local storm_iptables_v6_rules_file="$CLUSTER_CONF_DIR/$CLUSTER_NAME-rules.v6"
 	cp $template_v6_rules $storm_iptables_v6_rules_file
+	chmod go-rwx $storm_iptables_v6_rules_file
 	sed -i "s/\$CLUSTER_NAME/$CLUSTER_NAME/g" $storm_iptables_v6_rules_file
 	sed -i "s/\$ZK_CLUSTER_NAME/$zkcluster_name/g" $storm_iptables_v6_rules_file
 	
@@ -2079,6 +2093,7 @@ create_cluster_security_configurations() {
 	fi
 	local storm_client_iptables_v4_rules_file="$CLUSTER_CONF_DIR/$CLUSTER_NAME-client-rules.v4"
 	cp $template_client_v4_rules $storm_client_iptables_v4_rules_file
+	chmod go-rwx $storm_client_iptables_v4_rules_file
 	sed -i "s/\$CLUSTER_NAME/$CLUSTER_NAME/g" $storm_client_iptables_v4_rules_file
 	sed -i "s/\$ZK_CLUSTER_NAME/$zkcluster_name/g" $storm_client_iptables_v4_rules_file
 }
@@ -2211,7 +2226,7 @@ describe_cluster() {
 	fi
 
 	local stfile="$(status_file)"
-	# If the cluster does not exist, abort this addition.
+	# If the cluster does not exist, abort this operation.
 	if [ ! -f "$stfile" ]; then
 		echo "Cluster is not created. Only existing clusters can be described."
 		return 1
@@ -2517,17 +2532,20 @@ validate_image_configuration() {
 		invalid=1
 	fi
 	
-	if [ ! -z "$IMAGE_ADMIN_USER" ]; then
-		if [ -z "$IMAGE_ADMIN_PASSWORD" ]; then
-			echo "Validation error: IMAGE_ADMIN_PASSWORD should not be empty."
-			invalid=1
-		fi
+	if [ -z "$IMAGE_ADMIN_USER" ]; then
+		echo "Validation error: IMAGE_ADMIN_USER should not be empty."
+		invalid=1
+	fi
+	
+	if [ -z "$IMAGE_ADMIN_PASSWORD" ]; then
+		echo "Validation error: IMAGE_ADMIN_PASSWORD should not be empty."
+		invalid=1
+	fi
 		
-		if [ ! -z "$IMAGE_ADMIN_SSH_AUTHORIZED_KEYS" ]; then
-			if [ ! -f "$IMAGE_ADMIN_SSH_AUTHORIZED_KEYS" ]; then
-				echo "Validation error: IMAGE_ADMIN_SSH_AUTHORIZED_KEYS should be a valid public keys file."
-				invalid=1
-			fi
+	if [ ! -z "$IMAGE_ADMIN_SSH_AUTHORIZED_KEYS" ]; then
+		if [ ! -f "$IMAGE_ADMIN_SSH_AUTHORIZED_KEYS" ]; then
+			echo "Validation error: IMAGE_ADMIN_SSH_AUTHORIZED_KEYS should be a valid public keys file."
+			invalid=1
 		fi
 	fi
 	
@@ -2595,11 +2613,6 @@ validate_cluster_configuration() {
 		fi
 	fi
 	
-	if [ -z "$CLUSTER_MANAGER_NODE_PASSWORD" ]; then
-		echo "Validation error: CLUSTER_MANAGER_NODE_PASSWORD should be the password of the clustermgr user on cluster manager node."
-		invalid=1
-	fi
-	
 	return $invalid
 }
 
@@ -2620,6 +2633,12 @@ validate_api_env_configuration() {
 		invalid=1
 	fi
 	
+	if [ -z "$CLUSTER_MANAGER_NODE_PASSWORD" ]; then
+		echo "Validation error: CLUSTER_MANAGER_NODE_PASSWORD should be the password of the clustermgr user on cluster manager node."
+		invalid=1
+	fi
+	
+	
 	return $invalid
 }
 		
@@ -2639,7 +2658,13 @@ storm_install_dir() {
 
 
 create_status_file() {
-	touch $(status_file)
+	local stfile=$(status_file)
+	if [ ! -f "$stfile" ]; then
+		touch "$stfile"
+		
+		# Allow read access to clusteruser so that they can get info about this cluster.
+		chmod o+r-wx "$stfile"
+	fi
 }
 
 

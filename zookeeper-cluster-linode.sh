@@ -63,6 +63,8 @@ create_new_image_conf() {
 	cp template_zoo.cfg "$1/zoo.cfg"
 	cp template_zk_log4j.properties "$1/log4j.properties"
 	cp template-zk-supervisord.conf "$1/zk-supervisord.conf"
+	
+	chmod go-rwx $1/*
 }
 
 
@@ -192,8 +194,6 @@ create_zk_image() {
 	#echo "Installing Zookeeper software"
 	install_zookeeper_on_node $ipaddr $NODE_USERNAME
 
-	return 
-	
 	# Shutdown the linode.
 	echo "Shutting down the linode"
 	linode_api linout linerr linret "shutdown" $temp_linode_id
@@ -263,6 +263,7 @@ create_new_cluster_conf() {
 	mkdir -p "$1"
 	
 	cp zk-cluster-example.conf "$1/$1.conf"
+	chmod go-rwx "$1/$1.conf"
 }
 
 
@@ -916,7 +917,7 @@ set_hostname() {
 	ssh_command $target_ip $5 $NODE_ROOT_SSH_PRIVATE_KEY sudo sh hostname_manager.sh "change-hostname" $6 $2 $1 $4 $3
 
 	check_hostname=$(ssh_command $target_ip $5 $NODE_ROOT_SSH_PRIVATE_KEY hostname)
-	if [ $check_hostname == $1 ]; then
+	if [ "x$check_hostname" == "x$1" ]; then
 		echo "Verified new hostname"
 		return 0
 	fi
@@ -936,6 +937,8 @@ distribute_hostsfile() {
 
 	local hostsfile="$CLUSTER_CONF_DIR/$1.hosts"
 	touch $hostsfile
+	chmod go-rwx "$hostsfile"
+	
 	# Empty host file if it exists.
 	> $hostsfile
 
@@ -1272,6 +1275,7 @@ create_zk_configuration() {
 	local cluster_cfg="$CLUSTER_CONF_DIR/zoo.cfg"
 	local zk_conf_template="$IMAGE_CONF_DIR/zoo.cfg"
 	cp "$zk_conf_template" "$cluster_cfg"
+	chmod go-rwx "$cluster_cfg"
 	
 	add_section $cluster_cfg "nodes"
 
@@ -1430,10 +1434,12 @@ create_cluster_security_configurations() {
 	
 	local ipsets_file="$CLUSTER_CONF_DIR/$CLUSTER_NAME-rules.ipsets"
 	cat $zk_cluster_whitelist_file > $ipsets_file
+	chmod go-rwx "$ipsets_file"
 	
 	local all_whitelists_file="$CLUSTER_CONF_DIR/$CLUSTER_NAME-all-whitelists.ipsets"
 	echo "create all-whitelists list:set size 32" > $all_whitelists_file
 	echo "add all-whitelists $CLUSTER_NAME-wl" >> $all_whitelists_file
+	chmod go-rwx "$all_whitelists_file"
 	
 	local other_cluster_whitelists=$(get_section $stfile "whitelisted-clusters")
 	if [ "$other_cluster_whitelists" != "" ]; then
@@ -1457,6 +1463,8 @@ create_cluster_security_configurations() {
 	local cluster_v4_rules_file="$CLUSTER_CONF_DIR/$CLUSTER_NAME-rules.v4"
 	
 	cp "$template_v4_rules_file" "$cluster_v4_rules_file"
+	chmod go-rwx "$cluster_v4_rules_file"
+	
 	sed -i "s/\$CLUSTER_NAME/$CLUSTER_NAME/g" "$cluster_v4_rules_file"
 
 	# Make a copy of the referred v6 rules file into the cluster conf directory.
@@ -1468,6 +1476,7 @@ create_cluster_security_configurations() {
 	local cluster_v6_rules_file="$CLUSTER_CONF_DIR/$CLUSTER_NAME-rules.v6"
 	
 	cp "$template_v6_rules_file" "$cluster_v6_rules_file"
+	chmod go-rwx "$cluster_v6_rules_file"
 	sed -i "s/\$CLUSTER_NAME/$CLUSTER_NAME/g" "$cluster_v6_rules_file"
 
 }
@@ -1947,17 +1956,20 @@ validate_image_configuration() {
 		invalid=1
 	fi
 	
-	if [ ! -z "$IMAGE_ADMIN_USER" ]; then
-		if [ -z "$IMAGE_ADMIN_PASSWORD" ]; then
-			echo "Validation error: IMAGE_ADMIN_PASSWORD should not be empty."
+	if [ -z "$IMAGE_ADMIN_USER" ]; then
+		echo "Validation error: IMAGE_ADMIN_USER should not be empty."
+		invalid=1
+	fi
+
+	if [ -z "$IMAGE_ADMIN_PASSWORD" ]; then
+		echo "Validation error: IMAGE_ADMIN_PASSWORD should not be empty."
+		invalid=1
+	fi
+	
+	if [ ! -z "$IMAGE_ADMIN_SSH_AUTHORIZED_KEYS" ]; then
+		if [ ! -f "$IMAGE_ADMIN_SSH_AUTHORIZED_KEYS" ]; then
+			echo "Validation error: IMAGE_ADMIN_SSH_AUTHORIZED_KEYS should be a valid public keys file."
 			invalid=1
-		fi
-		
-		if [ ! -z "$IMAGE_ADMIN_SSH_AUTHORIZED_KEYS" ]; then
-			if [ ! -f "$IMAGE_ADMIN_SSH_AUTHORIZED_KEYS" ]; then
-				echo "Validation error: IMAGE_ADMIN_SSH_AUTHORIZED_KEYS should be a valid public keys file."
-				invalid=1
-			fi
 		fi
 	fi
 
@@ -2025,11 +2037,6 @@ validate_cluster_configuration() {
 		fi
 	fi
 	
-	if [ -z "$CLUSTER_MANAGER_NODE_PASSWORD" ]; then
-		echo "Validation error: CLUSTER_MANAGER_NODE_PASSWORD should be the password of the clustermgr user on cluster manager node."
-		invalid=1
-	fi
-	
 	return $invalid
 }
 
@@ -2049,6 +2056,12 @@ validate_api_env_configuration() {
 		echo "Validation error: Invalid API configuration file - LINODE_API_URL should not be empty"
 		invalid=1
 	fi
+	
+	if [ -z "$CLUSTER_MANAGER_NODE_PASSWORD" ]; then
+		echo "Validation error: CLUSTER_MANAGER_NODE_PASSWORD should be the password of the clustermgr user on cluster manager node."
+		invalid=1
+	fi
+	
 	
 	return $invalid
 }
@@ -2140,7 +2153,13 @@ wait_for_job() {
 
 
 create_status_file() {
-	touch $(status_file)
+	local stfile=$(status_file)
+	if [ ! -f "$stfile" ]; then
+		touch "$stfile"
+		
+		# Allow read access to clusteruser so that they can get info about this cluster.
+		chmod o+r-wx "$stfile"
+	fi
 }
 
 
