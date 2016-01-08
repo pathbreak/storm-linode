@@ -156,7 +156,9 @@ delete_line() {
 
 	local header=$(section_header $2)
 	local footer=$(section_footer $2)
-	sed -r -i "/$header/,/$footer/ {/$3/ d}" $1
+	# Use | (pipe) as delimiter of search string, because it may be a file path with forward
+	# slashes. To use pipe as delimier, it should be escaped with a \ (backslash).
+	sed -r -i "/$header/,/$footer/ {\|$3| d}" $1
 }
 
 # Gets all lines inside a section, excluding the section header and footer.
