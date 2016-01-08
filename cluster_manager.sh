@@ -4,11 +4,36 @@ PLAN_ID=1
 DATACENTER="newark"
 DISTRIBUTION=124
 KERNEL=138
-ROOT_PASSWORD="ClUsTeRMgR1!?"
+# Set DISABLE_SSH_PASSWORD_AUTHENTICATION 
+DISABLE_SSH_PASSWORD_AUTHENTICATION=yes
 
+STORM_URL='http://www.us.apache.org/dist/storm/apache-storm-0.9.5/apache-storm-0.9.5.tar.gz'
+ZOOKEEPER_URL='http://www.us.apache.org/dist/zookeeper/zookeeper-3.4.7/zookeeper-3.4.7.tar.gz'
 
 create_cluster_manager_linode() {
 	. $1
+	
+	if [ "x$ROOT_PASSWORD" == "x" ]; then
+		printf "Error: ROOT_PASSWORD for the cluster manager node is not set. Type \n \
+		export ROOT_PASSWORD='<a strong password>'\nin your terminal and re-run this script.\n\n"
+		return 1
+	fi
+	
+	# Check if the Zookeeper and Storm packages are available, because sometimes releases are taken off the download
+	# servers.
+	local zk_url_check=$(curl -s -o /dev/null -I -w "%{http_code}" "$ZOOKEEPER_URL")
+	if [ "$zk_url_check" == "404" ]; then
+		echo "Error: The Zookeeper package $ZOOKEEPER_URL is no longer available. Open this file in an editor and change ZOOKEEPER_URL to an available package URL."
+		return 1
+	fi
+	local storm_url_check=$(curl -s -o /dev/null -I -w "%{http_code}" "$STORM_URL")
+	if [ "$storm_url_check" == "404" ]; then
+		echo "Error: The Storm package $STORM_URL is no longer available. Open this file in an editor and change STORM_URL to an available package URL."
+		return 1
+	fi
+	
+	echo "Creating keypair for cluster manager linode ssh authentication"
+	ssh-keygen -t rsa -b 4096 -q -f $HOME/.ssh/clustermgr -N ''
 	
 	local linout linerr linret
 	
@@ -23,7 +48,7 @@ create_cluster_manager_linode() {
 	# Create a disk from distribution.
 	echo "Creating disk"
 	linode_api linout linerr linret "create-disk-from-distribution" $linode_id "$DISTRIBUTION" \
-		8000 "$ROOT_PASSWORD" ""
+		8000 "$ROOT_PASSWORD" "$HOME/.ssh/clustermgr.pub"
 		
 	if [ $linret -eq 1 ]; then
 		echo "Failed to create disk. Error:$linerr"
@@ -101,13 +126,21 @@ create_cluster_manager_linode() {
 	fi
 	
 	echo "Cluster manager node has booted. Public IP address: $public_ip"
+	
+	echo "Copying cluster_manager.sh to cluster manager node"
+	scp -i "$HOME/.ssh/clustermgr" -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no 'cluster_manager.sh' \
+		"root@$public_ip:cluster_manager.sh"
+	
+	echo "Running cluster_manager.sh setup on cluster manager node"
+	ssh_command "$public_ip" "root" "$HOME/.ssh/clustermgr" sh -c \
+		'chmod ugo+x *.sh; ./cluster_manager.sh setup'
 }
 
 setup_cluster_manager() {
 	apt-get -y update
-	apt-get -y upgrade
+	#apt-get -y upgrade
 	
-	apt-get -y install git python2.7 ssh wget
+	apt-get -y install git python2.7 ssh wget sed
 	
 	# Create the 'clustermgr' user for running scripts.
 	# It should be part of sudo because script should modify /etc/hosts of cluster manager node
@@ -128,14 +161,56 @@ setup_cluster_manager() {
 	cd storm-linode
 	chmod +x *.sh *.py
 	
-	wget http://www.us.apache.org/dist/storm/apache-storm-0.9.5/apache-storm-0.9.5.tar.gz
-	wget http://www.us.apache.org/dist/zookeeper/zookeeper-3.4.6/zookeeper-3.4.6.tar.gz
+	wget "$STORM_URL"
+	local storm_package_name=$(basename "$STORM_URL")
+	sed -i -r "s|^INSTALL_STORM_DISTRIBUTION=.*\$|INSTALL_STORM_DISTRIBUTION=./$storm_package_name|" storm-image-example.conf
+	
+	wget "$ZOOKEEPER_URL"
+	local zk_package_name=$(basename "$ZOOKEEPER_URL")
+	sed -i -r "s|^INSTALL_ZOOKEEPER_DISTRIBUTION=.*\$|INSTALL_ZOOKEEPER_DISTRIBUTION=./$zk_package_name|" zk-image-example.conf
 	
 	mkdir -p /home/clustermgr/.ssh
 	ssh-keygen -t rsa -b 4096 -q -f /home/clustermgr/.ssh/clusterroot -N ''
 	ssh-keygen -t rsa -b 4096 -q -f /home/clustermgr/.ssh/clusteradmin -N ''
 	
+	chmod go-rwx /home/clustermgr/storm-linode/*
 	chown -R clustermgr:clustermgr /home/clustermgr
+	
+	# Disable ssh password authentication.
+	if [ "$DISABLE_SSH_PASSWORD_AUTHENTICATION" == "yes" ];  then
+		echo "Disabling SSH password authentication"
+		
+		grep -q 'PasswordAuthentication yes$\|PasswordAuthentication no$' /etc/ssh/sshd_config
+		if [ $? -eq 1 ]; then 
+			echo 'PasswordAuthentication no' >> /etc/ssh/sshd_config
+		else 
+			sed -r -i '/PasswordAuthentication yes$|PasswordAuthentication no$/ c PasswordAuthentication no' /etc/ssh/sshd_config
+		fi
+		
+		
+		
+	elif [ "$DISABLE_SSH_PASSWORD_AUTHENTICATION" == "no" ];  then
+		echo "Enabling SSH password authentication"
+		
+		grep -q 'PasswordAuthentication yes$\|PasswordAuthentication no$' /etc/ssh/sshd_config
+		if [ $? -eq 1 ]; then
+			echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config
+		else 
+			sed -r -i '/PasswordAuthentication yes$|PasswordAuthentication no$/ c PasswordAuthentication yes' /etc/ssh/sshd_config
+		fi
+	fi
+	
+	service ssh restart
+
+	# Create 'clusteruser' non-privileged user for devs  to get information about clusters,
+	# such as client node IP addresses.
+	addgroup clusterusers
+	adduser --ingroup clusterusers clusteruser
+	
+	mkdir -p /home/clusteruser/storm-linode
+	cp cluster_info.sh /home/clusteruser/storm-linode/
+	cp textfileops.sh /home/clusteruser/storm-linode/
+	chown clusteruser:clusterusers /home/clusteruser/storm-linode/cluster_info.sh 
 }
 
 # $1 -> name of variable which receives output of command
@@ -207,6 +282,24 @@ wait_for_job() {
 	fi
 	
 	return $job_status
+}
+
+#	$1 -> IP address or hostname of node
+#	$2 -> SSH login username for node
+#	$3 -> SSH private key for node
+#	$4... -> Command and paramters to send to remote server. 
+#			 Either Redirection character (>) should be escaped with a backslash(\) (without
+#			 the backslash, the redirection is attempted on the host machine instead of guest)
+#			 Or instead of escaping, the command should be enclosed in a pair of '(...)'. That seems to work even with unescaped redirection.
+ssh_command() {
+
+	# IMPORTANT: The -n option is very important to avoid abruptly terminating callers who are in a "while read" loop. 
+	# This is because ssh without -n option reads complete stdin by default,
+	# as explained in http://stackoverflow.com/questions/346445/bash-while-read-loop-breaking-early
+	# -n : avoid reading stdin by redirecting stdin from /dev/null
+	# -x : disable X11 negotiation
+	# -q : quiet
+	ssh -q -n -x -i "$3" -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no $2@$1 ${@:4}
 }
 
 case $1 in
