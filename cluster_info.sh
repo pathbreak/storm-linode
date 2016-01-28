@@ -3,6 +3,8 @@
 . ./textfileops.sh
 
 list_clusters() {
+	printf "\n\nClusters\n========\n\n"
+	
 	local files=$(ls -1 /home/clustermgr/storm-linode/)
 	while read f
 	do
@@ -14,13 +16,27 @@ list_clusters() {
 			continue
 		fi
 		
-		grep -q NIMBUS_NODE_PUBLIC_HOSTNAME "/home/clustermgr/storm-linode/$f/$f.conf"
+		local stfile
+		stfile=$(ls /home/clustermgr/storm-linode/$f/*.info 2>/dev/null)
 		if [ $? -ne 0 ]; then
 			continue
 		fi
 		
-		echo "$f"
+		grep -q 'nimbus' "$stfile"
+		if [ $? -eq 0 ]; then
+			printf "$f\t\t[Storm cluster]\n"
+		
+		else
+			grep -q 'myids' "$stfile"
+			if [ $? -eq 0 ]; then
+				printf "$f\t\t[Zookeeper cluster]\n"
+			fi
+		fi
+		
+		
 	done <<< "$files"
+	
+	printf "\n\n"
 	
 	return 0
 }
@@ -38,18 +54,30 @@ print_cluster_info() {
 		return 1
 	fi
 	
-	grep -q NIMBUS_NODE_PUBLIC_HOSTNAME "/home/clustermgr/storm-linode/$1/$1.conf"
-	if [ $? -ne 0 ]; then
-		echo "Error: $1 is not a Storm cluster directory"
-		return 1
-	fi
-	
 	local stfile
 	stfile=$(ls /home/clustermgr/storm-linode/$1/*.info)
 	if [ $? -ne 0 ]; then
 		echo "$1 is not yet created"
 		return 1
 	fi
+
+	grep -q 'nimbus' "$stfile"
+	if [ $? -eq 0 ]; then
+		print_storm_cluster_info "$stfile"
+	else
+		grep -q 'myids' "$stfile"
+		if [ $? -eq 0 ]; then
+			print_zk_cluster_info "$stfile"
+		fi
+	fi
+	
+	return 0
+}
+
+# $1 : A storm cluster .info file.
+print_storm_cluster_info() {
+	
+	local stfile="$1"
 	
 	printf "\nStatus: $(get_section $stfile "status" | cut -d ':' -f2)\n\n"
 	
@@ -122,6 +150,49 @@ print_cluster_info() {
 	
 	done <<< "$(echo "$nodes" | grep 'supervisor')"
 	
+	return 0
+}
+
+# $1 : A zookeeper cluster .info file.
+print_zk_cluster_info() {
+	
+	local stfile="$1"
+	
+	printf "\nStatus: $(get_section $stfile "status" | cut -d ':' -f2)\n\n"
+	
+	local nodes=$(get_section $stfile "nodes")
+	local hostnames=$(get_section $stfile "hostnames")
+	local ipaddrs=$(get_section $stfile "ipaddresses")
+	local zkids=$(get_section $stfile "myids")
+
+	while read node;
+	do
+		local zk_linode_id=$(echo "$node")
+		local zk_ipline=$(echo "$ipaddrs"|grep "$zk_linode_id")
+		local zk_iparr=($zk_ipline)
+		local zk_private_ip=${zk_iparr[1]}
+		local zk_public_ip=${zk_iparr[2]}
+		local zk_hostsline=$(echo "$hostnames"|grep "$zk_linode_id")
+		local zk_hostsarr=($zk_hostsline)
+		local zk_private_host=${zk_hostsarr[1]}
+		local zk_public_host=${zk_hostsarr[2]}
+		local zk_idline=$(echo "$zkids"|grep "$zk_linode_id")
+		local zk_idarr=($zk_idline)
+		local zk_id=${zk_idarr[1]}
+
+		cat <<-ENDSTANZA
+			  Linode ID:		$zk_linode_id
+			  Private IP:		$zk_private_ip
+			  Private hostname:	$zk_private_host
+			  Public IP:		$zk_public_ip
+			  Public hostname:	$zk_public_host
+			  ZK ID:			$zk_id
+
+		ENDSTANZA
+	
+	done <<< "$(echo "$nodes")"
+	
+	return 0
 }
 
 case $1 in
