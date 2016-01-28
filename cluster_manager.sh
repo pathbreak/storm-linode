@@ -1,12 +1,34 @@
 #!/bin/bash
 
+# Set the root user password for cluster manager linode.
+# It should contain at least two of these four character classes: 
+# lower case letters - upper case letters - numbers - punctuation.
+#
+# Some special characters may require escape prefixing and the password to be enclosed in
+# single or double quotes.
+# Some examples:
+# - for password with spaces, enclose in double quotes 
+#		ROOT_PASSWORD="a PassworD with spaces"
+#
+# - for password with double quotes, enclose in double quotes and prefix every double quote in the password with a backslash \ : 
+#		ROOT_PASSWORD="pswd_WITH_\"dbl\"_quotes"
+#
+# - for password with $, enclose in double quotes and prefix every $ in the password with a backslash \ : 
+#		ROOT_PASSWORD="pswd_with_\$a_"
+ROOT_PASSWORD=""
+
 PLAN_ID=1
 DATACENTER="newark"
 DISTRIBUTION=124
 KERNEL=138
-# Set DISABLE_SSH_PASSWORD_AUTHENTICATION 
+
+# Set the default available ssh authentication mechanisms to log in to the cluster manager node.
+# Password authentication is considered less secure, and hence disabled by default.
+# 	'yes' disables password authentication and enables only public key authentication.
+# 	'no' enables both public key and password authentication.
 DISABLE_SSH_PASSWORD_AUTHENTICATION=yes
 
+# The default Storm and Zookeeper download URLs.
 STORM_URL='http://www.us.apache.org/dist/storm/apache-storm-0.9.5/apache-storm-0.9.5.tar.gz'
 ZOOKEEPER_URL='http://www.us.apache.org/dist/zookeeper/zookeeper-3.4.7/zookeeper-3.4.7.tar.gz'
 
@@ -14,8 +36,8 @@ create_cluster_manager_linode() {
 	. $1
 	
 	if [ "x$ROOT_PASSWORD" == "x" ]; then
-		printf "Error: ROOT_PASSWORD for the cluster manager node is not set. Type \n \
-		export ROOT_PASSWORD='<a strong password>'\nin your terminal and re-run this script.\n\n"
+		printf "Error: ROOT_PASSWORD for the cluster manager node is not set. \n \
+		Open this file in an editor, set ROOT_PASSWORD='<a strong password>' and re-run this script.\n\n"
 		return 1
 	fi
 	
@@ -32,8 +54,14 @@ create_cluster_manager_linode() {
 		return 1
 	fi
 	
-	echo "Creating keypair for cluster manager linode ssh authentication"
+	echo "Creating keypair for cluster manager root ssh authentication"
+	ssh-keygen -t rsa -b 4096 -q -f $HOME/.ssh/clustermgrroot -N ''
+	
+	echo "Creating keypair for cluster manager clustermgr user ssh authentication"
 	ssh-keygen -t rsa -b 4096 -q -f $HOME/.ssh/clustermgr -N ''
+	
+	echo "Creating keypair for cluster manager clustermgrguest user ssh authentication"
+	ssh-keygen -t rsa -b 4096 -q -f $HOME/.ssh/clustermgrguest -N ''
 	
 	local linout linerr linret
 	
@@ -44,11 +72,12 @@ create_cluster_manager_linode() {
 		return 1
 	fi
 	local linode_id=$linout
+	echo "Created cluster manager linode $linode_id"
 
 	# Create a disk from distribution.
 	echo "Creating disk"
 	linode_api linout linerr linret "create-disk-from-distribution" $linode_id "$DISTRIBUTION" \
-		8000 "$ROOT_PASSWORD" "$HOME/.ssh/clustermgr.pub"
+		8000 "$ROOT_PASSWORD" "$HOME/.ssh/clustermgrroot.pub"
 		
 	if [ $linret -eq 1 ]; then
 		echo "Failed to create disk. Error:$linerr"
@@ -128,12 +157,27 @@ create_cluster_manager_linode() {
 	echo "Cluster manager node has booted. Public IP address: $public_ip"
 	
 	echo "Copying cluster_manager.sh to cluster manager node"
-	scp -i "$HOME/.ssh/clustermgr" -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no 'cluster_manager.sh' \
+	scp -i "$HOME/.ssh/clustermgrroot" -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no 'cluster_manager.sh' \
 		"root@$public_ip:cluster_manager.sh"
-	
+		
 	echo "Running cluster_manager.sh setup on cluster manager node"
-	ssh_command "$public_ip" "root" "$HOME/.ssh/clustermgr" sh -c \
-		'chmod ugo+x *.sh; ./cluster_manager.sh setup'
+	ssh_command "$public_ip" "root" "$HOME/.ssh/clustermgrroot" "chmod ugo+x *.sh; ./cluster_manager.sh setup"
+
+	echo "Copying clustermgr public key to cluster manager node"
+	scp -i "$HOME/.ssh/clustermgrroot" -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no "$HOME/.ssh/clustermgr.pub" \
+		"root@$public_ip:/home/clustermgr/.ssh/authorized_keys"
+		
+	ssh_command "$public_ip" "root" "$HOME/.ssh/clustermgrroot" "chmod go-w /home/clustermgr/.ssh/authorized_keys; chown clustermgr:clustermgr /home/clustermgr/.ssh/authorized_keys"
+	
+	echo "Copying clustermgrguest public key to cluster manager node"
+	scp -i "$HOME/.ssh/clustermgrroot" -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no "$HOME/.ssh/clustermgrguest.pub" \
+		"root@$public_ip:/home/clustermgrguest/.ssh/authorized_keys"
+		
+	ssh_command "$public_ip" "root" "$HOME/.ssh/clustermgrroot" "chmod go-w /home/clustermgrguest/.ssh/authorized_keys; chown clustermgrguest:clustermgrguests /home/clustermgrguest/.ssh/authorized_keys"
+	
+	# Cleanup:
+	# We don't want to keep the cluster_manager.sh around, since it contains the root user password for the node.
+	rm ./cluster_manager.sh
 }
 
 setup_cluster_manager() {
@@ -202,15 +246,15 @@ setup_cluster_manager() {
 	
 	service ssh restart
 
-	# Create 'clusteruser' non-privileged user for devs  to get information about clusters,
+	# Create 'clustermgrguest' non-privileged user for devs  to get non-sensitive information about clusters,
 	# such as client node IP addresses.
-	addgroup clusterusers
-	adduser --ingroup clusterusers clusteruser
+	addgroup clustermgrguests
+	adduser --ingroup clustermgrguests clustermgrguest
 	
-	mkdir -p /home/clusteruser/storm-linode
-	cp cluster_info.sh /home/clusteruser/storm-linode/
-	cp textfileops.sh /home/clusteruser/storm-linode/
-	chown clusteruser:clusterusers /home/clusteruser/storm-linode/cluster_info.sh 
+	mkdir -p /home/clustermgrguest/storm-linode
+	cp cluster_info.sh /home/clustermgrguest/storm-linode/
+	cp textfileops.sh /home/clustermgrguest/storm-linode/
+	chown -R clustermgrguest:clustermgrguests /home/clustermgrguest/
 }
 
 # $1 -> name of variable which receives output of command
@@ -299,7 +343,7 @@ ssh_command() {
 	# -n : avoid reading stdin by redirecting stdin from /dev/null
 	# -x : disable X11 negotiation
 	# -q : quiet
-	ssh -q -n -x -i "$3" -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no $2@$1 ${@:4}
+	ssh -q -n -x -i "$3" -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no $2@$1 "${@:4}"
 }
 
 case $1 in
