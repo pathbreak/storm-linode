@@ -335,6 +335,9 @@ create_cluster() {
 		return 1
 	fi
 
+	# Since nodes created from an image retain the image's host keys, they should
+	# be changed to unique ones before doing anything else.
+	change_hostkeys $CLUSTER_NAME
 
 	set_hostnames $CLUSTER_NAME
 
@@ -1024,6 +1027,41 @@ stop_nodes() {
 	
 }
 
+
+#	$1 : Name of the cluster as specified in it's cluster conf file.
+#	$2: (Optional) filter for entries in "nodes" section. Only these nodes' host keys will be regenerated.
+change_hostkeys() {
+	local stfile="$(status_file)"
+
+	# Note: output of get_section is multiline, so always use it inside double quotes such as "$entries"
+	local nodes=$(get_section $stfile "nodes")	
+	if [ ! -z "$2" ]; then
+		nodes=$(echo "$nodes"|grep "$2")
+	fi
+	local ipaddrs=$(get_section $stfile "ipaddresses")
+
+	while read nodeentry; do
+		# An entry in nodes section is of the form "nodename:role"
+		local arr=(${nodeentry//:/ })
+		local linode_id=${arr[0]}
+		local role=${arr[1]}
+		
+		local private_ip=$(echo "$ipaddrs" | grep $linode_id | cut -d ' ' -f 2)
+		local public_ip=$(echo "$ipaddrs" | grep $linode_id | cut -d ' ' -f 3)
+
+		echo "Changing host keys of $linode_id..."
+
+		# Default ssh target is the private IP address.
+		local target_ip=$private_ip
+		if [ "$CLUSTER_MANAGER_USES_PUBLIC_IP" == "true" ]; then
+			target_ip=$public_ip
+		fi
+
+		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "sh -c
+			\"rm /etc/ssh/ssh_host_*;/usr/sbin/dpkg-reconfigure openssh-server\""
+			
+	done <<< "$nodes" # The "$nodes" should be in double quotes because output is multline
+}
 
 
 
@@ -1815,6 +1853,10 @@ add_nodes() {
 	fi
 
 	start_nodes $CLUSTER_NAME ":supervisor:new"
+	
+	# Since nodes created from an image retain the image's host keys, they should
+	# be changed to unique ones before doing anything else.
+	change_hostkeys $CLUSTER_NAME ":supervisor:new"
 
 	set_hostnames $CLUSTER_NAME ":supervisor:new"
 

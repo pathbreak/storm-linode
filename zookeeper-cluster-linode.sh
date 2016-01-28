@@ -312,6 +312,10 @@ create_cluster() {
 
 	start_nodes $CLUSTER_NAME
 	
+	# Since nodes created from an image retain the image's host keys, they should
+	# be changed to unique ones before doing anything else.
+	change_hostkeys $CLUSTER_NAME
+	
 	set_hostnames $CLUSTER_NAME
 
 	distribute_hostsfile $CLUSTER_NAME
@@ -851,6 +855,36 @@ stop_nodes() {
 	done
 	
 	return 0
+}
+
+
+
+#	$1 : Name of the cluster as specified in it's cluster conf file.
+change_hostkeys() {
+	local stfile="$(status_file)"
+
+	local ipaddrs=$(get_section $stfile "ipaddresses")
+
+	while read entry;
+	do
+		# An entry in ipaddresses section is of the form "linode_id private_ipaddress public_ipaddress"
+		local arr=($entry)
+		local linode_id=${arr[0]}
+		local private_ip=${arr[1]}
+		local public_ip=${arr[2]}
+		
+		echo "Changing host keys of $linode_id..."
+
+		# Default ssh target is the private IP address.
+		local target_ip=$private_ip
+		if [ "$CLUSTER_MANAGER_USES_PUBLIC_IP" == "true" ]; then
+			target_ip=$public_ip
+		fi
+
+		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "sh -c
+			\"rm /etc/ssh/ssh_host_*;/usr/sbin/dpkg-reconfigure openssh-server\""
+			
+	done <<< "$ipaddrs" # The "$ipaddrs" should be in double quotes because output is multline
 }
 
 
