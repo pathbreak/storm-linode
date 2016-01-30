@@ -17,9 +17,32 @@
 #		ROOT_PASSWORD="pswd_with_\$a_"
 ROOT_PASSWORD=""
 
+# Select the configuration plan for cluster manager linode.
+# See available plans by running these commands in a terminal:
+# 	$ source ./api_env_linode.conf 
+#	$ ./linode_api.py plans
 PLAN_ID=1
+
+# Select the Linode datacenter where cluster manager linode should be created.
+# Select a location that is geographically closest to your location.
+# See available datacenters by running these commands in a terminal:
+# 	$ source ./api_env_linode.conf 
+#	$ ./linode_api.py datacenters
 DATACENTER="newark"
+
+# Select a Linux distribution for the cluster manager linode.
+# Currently, this script runs only on Ubuntu distributions.
+# Default value of 124 selects Ubuntu 14.04 64-bit LTS (Long Term Support) version.
+# See all available Ubuntu distributions by running these commands in a terminal:
+# 	$ source ./api_env_linode.conf 
+#	$ ./linode_api.py distributions "Ubuntu" table
 DISTRIBUTION=124
+
+# Select a Linux kernel version for the cluster manager linode.
+# Default value of 138 selects latest 64-bit kernel version provided by Linode.
+# See all available kernels by running these commands in a terminal:
+# 	$ source ./api_env_linode.conf 
+#	$ ./linode_api.py kernels "" table
 KERNEL=138
 
 # Set the default available ssh authentication mechanisms to log in to the cluster manager node.
@@ -30,7 +53,7 @@ DISABLE_SSH_PASSWORD_AUTHENTICATION=yes
 
 # The default Storm and Zookeeper download URLs.
 STORM_URL='http://www.us.apache.org/dist/storm/apache-storm-0.9.5/apache-storm-0.9.5.tar.gz'
-ZOOKEEPER_URL='http://www.us.apache.org/dist/zookeeper/zookeeper-3.4.7/zookeeper-3.4.7.tar.gz'
+ZOOKEEPER_URL='http://www.us.apache.org/dist/zookeeper/zookeeper-3.4.6/zookeeper-3.4.6.tar.gz'
 
 create_cluster_manager_linode() {
 	. $1
@@ -99,10 +122,38 @@ create_cluster_manager_linode() {
 		return 1
 	fi
 	
+	# Create a swap disk sized according to the linode's RAM.
+	# The linode distributions are configured to expect /dev/sdb block device
+	# as swap space. If a swap disk is not part of the configuration, everything
+	# still succeeds but the dashboard shows a misconfiguration warning, and
+	# performance may also suffer.
+	echo "Creating swap disk"
+	linode_api linout linerr linret "create-swap-disk" $linode_id
+		
+	if [ $linret -eq 1 ]; then
+		echo "Failed to create swap disk. Error:$linerr"
+		return 1
+	fi
+	local swap_disk_id=$(echo $linout|cut -d ',' -f1)
+	local create_swap_disk_job_id=$(echo $linout|cut -d ',' -f2)
+
+	local disk_result
+	wait_for_job $create_swap_disk_job_id $linode_id
+	disk_result=$?
+	if [ $disk_result -eq 0 ]; then
+		echo "Create swap disk did not complete even after 4 minutes. Aborting"
+		return 1
+	fi
+
+	if [ $disk_result -ge 2 ]; then
+		echo "Create swap disk failed."
+		return 1
+	fi
+	
 	# Create a configuration profile with that disk.
 	echo "Creating a configuration"
 	linode_api linout linerr linret "create-config" $linode_id "$KERNEL" \
-		$disk_id "clustermgr-configuration"
+		"$disk_id,$swap_disk_id" "clustermgr-configuration"
 	if [ $linret -eq 1 ]; then
 		echo "Failed to create configuration. Error:$linerr"
 		return 1
@@ -157,20 +208,20 @@ create_cluster_manager_linode() {
 	echo "Cluster manager node has booted. Public IP address: $public_ip"
 	
 	echo "Copying cluster_manager.sh to cluster manager node"
-	scp -i "$HOME/.ssh/clustermgrroot" -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no 'cluster_manager.sh' \
+	scp -i "$HOME/.ssh/clustermgrroot" -o IdentitiesOnly=yes -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no 'cluster_manager.sh' \
 		"root@$public_ip:cluster_manager.sh"
 		
 	echo "Running cluster_manager.sh setup on cluster manager node"
 	ssh_command "$public_ip" "root" "$HOME/.ssh/clustermgrroot" "chmod ugo+x *.sh; ./cluster_manager.sh setup"
 
 	echo "Copying clustermgr public key to cluster manager node"
-	scp -i "$HOME/.ssh/clustermgrroot" -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no "$HOME/.ssh/clustermgr.pub" \
+	scp -i "$HOME/.ssh/clustermgrroot" -o IdentitiesOnly=yes -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no "$HOME/.ssh/clustermgr.pub" \
 		"root@$public_ip:/home/clustermgr/.ssh/authorized_keys"
 		
 	ssh_command "$public_ip" "root" "$HOME/.ssh/clustermgrroot" "chmod go-w /home/clustermgr/.ssh/authorized_keys; chown clustermgr:clustermgr /home/clustermgr/.ssh/authorized_keys"
 	
 	echo "Copying clustermgrguest public key to cluster manager node"
-	scp -i "$HOME/.ssh/clustermgrroot" -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no "$HOME/.ssh/clustermgrguest.pub" \
+	scp -i "$HOME/.ssh/clustermgrroot" -o IdentitiesOnly=yes -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no "$HOME/.ssh/clustermgrguest.pub" \
 		"root@$public_ip:/home/clustermgrguest/.ssh/authorized_keys"
 		
 	ssh_command "$public_ip" "root" "$HOME/.ssh/clustermgrroot" "chmod go-w /home/clustermgrguest/.ssh/authorized_keys; chown clustermgrguest:clustermgrguests /home/clustermgrguest/.ssh/authorized_keys"
@@ -251,6 +302,7 @@ setup_cluster_manager() {
 	addgroup clustermgrguests
 	adduser --ingroup clustermgrguests clustermgrguest
 	
+	mkdir -p /home/clustermgrguest/.ssh
 	mkdir -p /home/clustermgrguest/storm-linode
 	cp cluster_info.sh /home/clustermgrguest/storm-linode/
 	cp textfileops.sh /home/clustermgrguest/storm-linode/
@@ -343,7 +395,7 @@ ssh_command() {
 	# -n : avoid reading stdin by redirecting stdin from /dev/null
 	# -x : disable X11 negotiation
 	# -q : quiet
-	ssh -q -n -x -i "$3" -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no $2@$1 "${@:4}"
+	ssh -q -n -x -i "$3" -o IdentitiesOnly=yes -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no $2@$1 "${@:4}"
 }
 
 case $1 in

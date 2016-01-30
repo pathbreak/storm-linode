@@ -399,6 +399,47 @@ def create_disk(linode_id, distribution, disk_size, root_password, root_ssh_key_
 
 
 
+def create_swap_disk(linode_id):
+	# From https://www.linode.com/api/linode/linode.disk.create
+	
+	# Calculate swap size based on RAM.
+	# - 2GB of RAM or less            = 2 x RAM
+	# - 2GB to 8GB of RAM             = RAM
+	# - 8GB to 64GB of RAM            = At least 4 GB to 0.5 x RAM
+	# - 64GB of RAM or more           = At least 4 GB
+	# References:
+	#	http://askubuntu.com/questions/49109/i-have-16gb-ram-do-i-need-32gb-swap and 
+	#	https://access.redhat.com/documentation/en-US/Red_Hat_Enterprise_Linux/7/html/Installation_Guide/sect-disk-partitioning-setup-x86.html#sect-recommended-partitioning-scheme-x86
+	ram_mb = int(get_node_memory(linode_id))
+	swap_disk_size_mb = 2048
+	if 1024 <= ram_mb <= 2048:
+		swap_disk_size_mb = 2 * ram_mb
+		
+	elif 4096 <= ram_mb <= 8192:
+		swap_disk_size_mb = ram_mb
+		
+	elif ram_mb >= 16384:
+		swap_disk_size_mb = ram_mb / 2;
+		
+	
+	params={
+		'LinodeID' : linode_id,
+		'Type' : 'swap',
+		'Size' : swap_disk_size_mb,
+		'Label' : 'swapdisk'
+	}
+	resp = linode_request('linode.disk.create', params)
+	iserr, errors = is_error(resp)
+	if iserr:
+		return (False, errors)
+	
+	job_id = resp['DATA']['JobID']
+	disk_id = resp['DATA']['DiskID']
+	return (True, (disk_id, job_id) )
+
+
+
+
 def create_disk_from_distribution(linode_id, distribution, disk_size, root_password, root_ssh_key_file):
 	# 'distribution' may be an id or just a label that matches an entry in avail.distributions. 
 	# Find its actual ID and check for validity.
@@ -643,8 +684,8 @@ if (url is None):
 	print "Error : LINODE_API_URL environment var is not defined"
 	sys.exit(1)
 
-if url == API_PRODUCTION_URL:
-	print >> sys.stderr, "**** CAUTION: USING PRODUCTION URL"
+#if url == API_PRODUCTION_URL:
+	#print >> sys.stderr, "**** CAUTION: USING PRODUCTION URL"
 
 cmd=sys.argv[1]
 if (cmd == 'datacenters'):
@@ -884,6 +925,21 @@ elif (cmd == 'create-disk-from-distribution'):
 	root_ssh_key_file = sys.argv[6]
 	
 	success, data = create_disk_from_distribution(linode_id, distribution, disk_size, root_password, root_ssh_key_file)
+	if not success:
+		print >>sys.stderr, data
+		sys.exit(1)
+	
+	disk_id = data[0]
+	job_id = data[1]
+	print "%d,%d" % (disk_id, job_id)
+	sys.exit(0)
+
+elif (cmd == 'create-swap-disk'):
+	# Output: "<disk-ID>,<job-ID>" on success, or nothing on failure
+	# Returns: 0 on success or 1 on failure. Error details on stderr
+	linode_id = int(sys.argv[2])
+	
+	success, data = create_swap_disk(linode_id)
 	if not success:
 		print >>sys.stderr, data
 		sys.exit(1)

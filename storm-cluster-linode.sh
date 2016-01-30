@@ -770,11 +770,39 @@ create_single_node() {
 	fi
 	echo "Finished creating disk $disk_id from Zookeeper image for linode $__linode_id"
 	
+	# Create a swap disk sized according to the linode's RAM.
+	# The linode distributions are configured to expect /dev/sdb block device
+	# as swap space. If a swap disk is not part of the configuration, everything
+	# still succeeds but the dashboard shows a misconfiguration warning, and
+	# performance may also suffer.
+	echo "Creating swap disk"
+	linode_api linout linerr linret "create-swap-disk" $__linode_id
+		
+	if [ $linret -eq 1 ]; then
+		echo "Failed to create swap disk. Error:$linerr"
+		return 1
+	fi
+	local swap_disk_id=$(echo $linout|cut -d ',' -f1)
+	local create_swap_disk_job_id=$(echo $linout|cut -d ',' -f2)
+
+	local disk_result
+	wait_for_job $create_swap_disk_job_id $__linode_id
+	disk_result=$?
+	if [ $disk_result -eq 0 ]; then
+		echo "Create swap disk did not complete even after 4 minutes. Aborting"
+		return 1
+	fi
+
+	if [ $disk_result -ge 2 ]; then
+		echo "Create swap disk failed."
+		return 1
+	fi
+	
 	# Create a configuration profile with that disk. The 0 at the end
 	# avoids validating kernel id for every iteration. 
 	echo "Creating a configuration"
 	linode_api linout linerr linret "create-config" $__linode_id $kernel_id \
-		$disk_id "Storm-configuration" 0
+		"$disk_id,$swap_disk_id" "Storm-configuration" 0
 	if [ $linret -eq 1 ]; then
 		echo "Failed to create configuration. Error:$linerr"
 		return 1
@@ -2907,7 +2935,7 @@ remote_copyfile() {
 	# "/dir\ with\ spaces/filename\ with\ spaces"
 	local destfile=$(printf "$5"|sed 's/ /\\ /g')
 	
-	scp -i "$4" -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no "$1" $3@$2:"$destfile"
+	scp -i "$4" -o IdentitiesOnly=yes -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no "$1" $3@$2:"$destfile"
 	return $?
 }
 
@@ -2928,7 +2956,7 @@ ssh_command() {
 	# -n : avoid reading stdin by redirecting stdin from /dev/null
 	# -x : disable X11 negotiation
 	# -q : quiet
-	ssh -q -n -x -i "$3" -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no $2@$1 ${@:4}
+	ssh -q -n -x -i "$3" -o IdentitiesOnly=yes -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no $2@$1 ${@:4}
 }
 
 
