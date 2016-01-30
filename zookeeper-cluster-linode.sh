@@ -3,6 +3,7 @@
 # Workaround to avoid "Agent admitted failure to sign using the key." ssh error despite
 # using correct key, due to some conflict with gnone-keyring.
 SSH_AUTH_SOCK=0
+export SSH_AUTH_SOCK
 
 # $1 : Name of cluster configuration file
 init_conf() {
@@ -345,6 +346,8 @@ create_cluster() {
 	fi
 
 	update_cluster_status "created"
+	
+	echo "Zookeeper cluster successfully created"
 }
 
 
@@ -445,6 +448,8 @@ start_cluster() {
 	start_zookeeper $CLUSTER_NAME
 
 	update_cluster_status "running"
+	
+	echo "Zookeeper cluster $CLUSTER_NAME is running"
 
 	return 0
 }
@@ -483,6 +488,8 @@ stop_cluster() {
 	stop_nodes $CLUSTER_NAME
 
 	update_cluster_status "stopped"
+	
+	echo "Zookeeper cluster $CLUSTER_NAME is stopped"
 }
 
 
@@ -841,6 +848,8 @@ destroy_cluster() {
 		
 		# Delete the host entries from this cluster manager machine on which this script is running.
 		echo "$CLUSTER_MANAGER_NODE_PASSWORD"|sudo -S sh hostname_manager.sh "delete-cluster" $CLUSTER_NAME
+		
+		echo "Zookeeper cluster $CLUSTER_NAME is destroyed"
 		
 	else
 		echo "Leaving cluster status file intact, because some nodes could not be destroyed"
@@ -1803,6 +1812,64 @@ stop_zookeeper() {
 }
 
 
+# $1 : The cluster conf file
+describe_cluster() {
+	if [ ! -f $1 ]; then
+		printf "Configuration file $1 not found.\nUsage: zookeeper-cluster-linode.sh describe CLUSTER-CONF-FILE\n"
+		return 1
+	fi
+	
+	init_conf $1
+	if [ $? -eq 1 ]; then
+		return 1
+	fi
+
+	local stfile="$(status_file)"
+	# If the cluster does not exist, abort this operation.
+	if [ ! -f "$stfile" ]; then
+		echo "Cluster is not created. Only existing clusters can be described."
+		return 1
+	fi
+	
+	printf "\nStatus: $(get_section $stfile "status" | cut -d ':' -f2)\n\n"
+	
+	local nodes=$(get_section $stfile "nodes")
+	local hostnames=$(get_section $stfile "hostnames")
+	local ipaddrs=$(get_section $stfile "ipaddresses")
+	local zkids=$(get_section $stfile "myids")
+
+	while read node;
+	do
+		local zk_linode_id=$(echo "$node")
+		local zk_ipline=$(echo "$ipaddrs"|grep "$zk_linode_id")
+		local zk_iparr=($zk_ipline)
+		local zk_private_ip=${zk_iparr[1]}
+		local zk_public_ip=${zk_iparr[2]}
+		local zk_hostsline=$(echo "$hostnames"|grep "$zk_linode_id")
+		local zk_hostsarr=($zk_hostsline)
+		local zk_private_host=${zk_hostsarr[1]}
+		local zk_public_host=${zk_hostsarr[2]}
+		local zk_idline=$(echo "$zkids"|grep "$zk_linode_id")
+		local zk_idarr=($zk_idline)
+		local zk_id=${zk_idarr[1]}
+
+		cat <<-ENDSTANZA
+			  Linode ID:        $zk_linode_id
+			  Private IP:       $zk_private_ip
+			  Private hostname: $zk_private_host
+			  Public IP:        $zk_public_ip
+			  Public hostname:  $zk_public_host
+			  ZK ID:            $zk_id
+
+		ENDSTANZA
+	
+	done <<< "$(echo "$nodes")"
+	
+	return 0
+}
+
+
+
 
 # $1 : The cluster conf file
 # $2... : Command to be run on all nodes of cluster.
@@ -2387,6 +2454,10 @@ case $1 in
 	
 	remove-whitelist) 
 	remove_from_whitelist $2 $3
+	;;
+	
+	describe)
+	describe_cluster $2
 	;;
 	
 	run)

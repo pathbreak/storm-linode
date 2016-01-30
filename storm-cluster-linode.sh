@@ -8,6 +8,7 @@
 # Workaround to avoid "Agent admitted failure to sign using the key." ssh error despite
 # using correct key, due to some conflict with gnone-keyring.
 SSH_AUTH_SOCK=0
+export SSH_AUTH_SOCK
 
 # $1 : Name of cluster configuration file
 init_conf() {
@@ -372,6 +373,8 @@ create_cluster() {
 	fi
 
 	update_cluster_status "created"
+	
+	echo "Storm cluster successfully created"
 }
 
 
@@ -490,6 +493,8 @@ start_cluster() {
 
 	update_cluster_status "running"
 
+	echo "Storm cluster $CLUSTER_NAME is running"
+	
 	return 0
 }
 
@@ -527,6 +532,8 @@ stop_cluster() {
 	stop_nodes $CLUSTER_NAME
 
 	update_cluster_status "stopped"
+	
+	echo "Storm cluster $CLUSTER_NAME is stopped"
 }
 
 
@@ -942,6 +949,9 @@ destroy_cluster() {
 
 		# Delete the host entries from this cluster manager machine on which this script is running.
 		echo $CLUSTER_MANAGER_NODE_PASSWORD|sudo -S sh hostname_manager.sh "delete-cluster" $CLUSTER_NAME
+		
+		echo "Storm cluster $CLUSTER_NAME is destroyed"
+		
 	else
 		echo "Leaving cluster status file intact, because some nodes could not be destroyed"
 	fi
@@ -2282,6 +2292,8 @@ update_client_user_whitelist() {
 	ssh_command $client_node_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY \
 		"sudo sh -c \"/etc/init.d/iptables-persistent flush;/etc/init.d/iptables-persistent reload\""
 	
+	echo "Finished updating client user whitelist"
+	
 	return 0
 }
 
@@ -2325,11 +2337,11 @@ describe_cluster() {
 		
 	cat <<-ENDSTANZA
 		Nimbus:
-		  Linode ID:		$nimbus_linode_id
-		  Private IP:		$nimbus_private_ip
-		  Private hostname:	$nimbus_private_host
-		  Public IP:		$nimbus_public_ip
-		  Public hostname:	$nimbus_public_host
+		  Linode ID:        $nimbus_linode_id
+		  Private IP:       $nimbus_private_ip
+		  Private hostname: $nimbus_private_host
+		  Public IP:        $nimbus_public_ip
+		  Public hostname:  $nimbus_public_host
 		  
 	ENDSTANZA
 	
@@ -2345,11 +2357,11 @@ describe_cluster() {
 		
 	cat <<-ENDSTANZA
 		Client:
-		  Linode ID:		$client_linode_id
-		  Private IP:		$client_private_ip
-		  Private hostname:	$client_private_host
-		  Public IP:		$client_public_ip
-		  Public hostname:	$client_public_host
+		  Linode ID:        $client_linode_id
+		  Private IP:       $client_private_ip
+		  Private hostname: $client_private_host
+		  Public IP:        $client_public_ip
+		  Public hostname:  $client_public_host
 		  
 	ENDSTANZA
 
@@ -2368,11 +2380,11 @@ describe_cluster() {
 		local sup_public_host=${sup_hostsarr[2]}
 
 		cat <<-ENDSTANZA
-			  Linode ID:		$sup_linode_id
-			  Private IP:		$sup_private_ip
-			  Private hostname:	$sup_private_host
-			  Public IP:		$sup_public_ip
-			  Public hostname:	$sup_public_host
+			  Linode ID:        $sup_linode_id
+			  Private IP:       $sup_private_ip
+			  Private hostname: $sup_private_host
+			  Public IP:        $sup_public_ip
+			  Public hostname:  $sup_public_host
 			  
 		ENDSTANZA
 	
@@ -2842,7 +2854,7 @@ get_rest_url() {
 }
 
 get_ui_port() {
-	local ui_port=$(cat $CLUSTER_NAME.storm.yaml | grep 'ui.port'|cut -d ':' -f2|xargs) # xargs trims enclosing whitespaces
+	local ui_port=$(cat "$CLUSTER_CONF_DIR/$CLUSTER_NAME.storm.yaml" | grep 'ui.port'|cut -d ':' -f2|xargs) # xargs trims enclosing whitespaces
 	if [ -z "$ui_port" ]; then
 		ui_port='8080'
 	fi

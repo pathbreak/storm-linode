@@ -58,6 +58,7 @@ ZOOKEEPER_URL='http://www.us.apache.org/dist/zookeeper/zookeeper-3.4.6/zookeeper
 # Workaround to avoid "Agent admitted failure to sign using the key." ssh error despite
 # using correct key, due to some conflict with gnone-keyring.
 SSH_AUTH_SOCK=0
+export SSH_AUTH_SOCK
 
 create_cluster_manager_linode() {
 	. $1
@@ -232,7 +233,9 @@ create_cluster_manager_linode() {
 	
 	# Cleanup:
 	# We don't want to keep the cluster_manager.sh around, since it contains the root user password for the node.
-	rm ./cluster_manager.sh
+	rm ./cluster_manager.sh ./linode_api.py ./api_env_*
+	
+	echo "Cluster Manager is ready. Log in using 'SSH_AUTH_SOCK=0 ssh -i ~/.ssh/clustermgr clustermgr@$public_ip'"
 }
 
 setup_cluster_manager() {
