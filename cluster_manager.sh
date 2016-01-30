@@ -55,6 +55,10 @@ DISABLE_SSH_PASSWORD_AUTHENTICATION=yes
 STORM_URL='http://www.us.apache.org/dist/storm/apache-storm-0.9.5/apache-storm-0.9.5.tar.gz'
 ZOOKEEPER_URL='http://www.us.apache.org/dist/zookeeper/zookeeper-3.4.6/zookeeper-3.4.6.tar.gz'
 
+# Workaround to avoid "Agent admitted failure to sign using the key." ssh error despite
+# using correct key, due to some conflict with gnone-keyring.
+SSH_AUTH_SOCK=0
+
 create_cluster_manager_linode() {
 	. $1
 	

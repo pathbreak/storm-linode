@@ -5,6 +5,10 @@
 
 . ./textfileops.sh
 
+# Workaround to avoid "Agent admitted failure to sign using the key." ssh error despite
+# using correct key, due to some conflict with gnone-keyring.
+SSH_AUTH_SOCK=0
+
 # $1 : Name of cluster configuration file
 init_conf() {
 	
