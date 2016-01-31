@@ -131,6 +131,12 @@ create_storm_image() {
 	local temp_linode_id=$linout
 	echo "Created temporary linode $temp_linode_id"
 
+	linode_api linout linerr linret "update-node" $linode_id "stormtmp-$linode_id" "temporary"
+	if [ $linret -eq 1 ]; then
+		echo "Failed to update node label $linode_id. Error:$linerr"
+		return 1
+	fi
+
 	# Create a disk from distribution.
 	echo "Creating disk"
 	linode_api linout linerr linret "create-disk-from-distribution" $temp_linode_id "$DISTRIBUTION_FOR_IMAGE" \
@@ -587,7 +593,7 @@ create_new_nodes() {
 	fi
 	
 	local nimbus_linode_id
-	create_single_node $1 $nimbus_plan_id $dc_id $image_id $kernel_id nimbus_linode_id
+	create_single_node $1 $nimbus_plan_id $dc_id $image_id $kernel_id nimbus_linode_id 'nimbus'
 	if [ $? -eq 1 ]; then
 		echo "Nimbus node creation failed. Aborting"
 		return 1
@@ -616,7 +622,7 @@ create_new_nodes() {
 	fi
 	
 	local client_linode_id
-	create_single_node $1 $client_plan_id $dc_id $image_id $kernel_id client_linode_id
+	create_single_node $1 $client_plan_id $dc_id $image_id $kernel_id client_linode_id 'client'
 	if [ $? -eq 1 ]; then
 		echo "Client node creation failed. Aborting"
 		return 1
@@ -664,7 +670,7 @@ create_supervisor_nodes() {
 		local supervisor_linode_id
 		while [ $sup_node_count -le $count ]; do
 			echo "Creating supervisor #$total_sup_count (plan $plan ID $plan_id)"
-			create_single_node $1 $plan_id $3 $4 $5 supervisor_linode_id
+			create_single_node $1 $plan_id $3 $4 $5 supervisor_linode_id 'sup'
 			if [ $? -eq 1 ]; then
 				echo "Supervisor node creation failed. Aborting"
 				return 1
@@ -735,6 +741,7 @@ get_plan_id() {
 # $4 : The image ID
 # $5 : The kernel ID
 # $6 : Name of a variable that'll receive the created linode ID.
+# $7 : Label prefix for linode
 create_single_node() {
 	local stfile="$(status_file)"
 	
@@ -754,6 +761,13 @@ create_single_node() {
 	eval $6="$__linode_id"
 	
 	echo "Created linode $__linode_id"
+	
+	linode_api linout linerr linret "update-node" $__linode_id "$7-$linode_id" "$CLUSTER_NAME"
+	if [ $linret -eq 1 ]; then
+		echo "Failed to update node label $__linode_id. Error:$linerr"
+		return 1
+	fi
+	
 	
 	# Create a disk from distribution.
 	echo "Creating disk from Storm image for linode $__linode_id"

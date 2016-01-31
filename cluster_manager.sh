@@ -102,6 +102,12 @@ create_cluster_manager_linode() {
 	local linode_id=$linout
 	echo "Created cluster manager linode $linode_id"
 
+	linode_api linout linerr linret "update-node" $linode_id "cluster-manager" "cluster-manager"
+	if [ $linret -eq 1 ]; then
+		echo "Failed to update node label $linode_id. Error:$linerr"
+		return 1
+	fi
+
 	# Create a disk from distribution.
 	echo "Creating disk"
 	linode_api linout linerr linret "create-disk-from-distribution" $linode_id "$DISTRIBUTION" \

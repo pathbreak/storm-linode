@@ -119,6 +119,12 @@ create_zk_image() {
 	local temp_linode_id=$linout
 	echo "Created temporary linode $temp_linode_id"
 	
+	linode_api linout linerr linret "update-node" $linode_id "zktmp-$linode_id" "temporary"
+	if [ $linret -eq 1 ]; then
+		echo "Failed to update node label $linode_id. Error:$linerr"
+		return 1
+	fi
+	
 	# Create a disk from distribution.
 	echo "Creating disk"
 	linode_api linout linerr linret "create-disk-from-distribution" $temp_linode_id "$DISTRIBUTION_FOR_IMAGE" \
@@ -641,12 +647,18 @@ create_new_nodes() {
 			local linode_id=$linout
 			
 			printf "\n\nCreated linode $linode_id\n"
-			
+
 			# Store created linode's instance ID in status file.
 			# No need to store additional data like plan ID or datacenter ID
 			# because both are available from "linode.list" if required
 			write_status "nodes" $linode_id
 			node_count=$((node_count+1))
+
+			linode_api linout linerr linret "update-node" $linode_id "zk-$linode_id" "$CLUSTER_NAME"
+			if [ $linret -eq 1 ]; then
+				echo "Failed to update node label $linode_id. Error:$linerr"
+				return 1
+			fi
 			
 			# Create a disk from distribution.
 			echo "Creating disk from Zookeeper image for linode $linode_id"

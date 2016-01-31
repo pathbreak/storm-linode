@@ -324,6 +324,25 @@ def create_node(plan, datacenter, do_validations=True):
 	return (True, linode_id)
 
 
+
+def update_node(linode_id, label, display_group):
+	resp = linode_request('linode.update', 
+		{
+			'LinodeID' : linode_id,
+			'Label' : label,
+			'lpm_displayGroup' : display_group
+		}
+	)
+	
+	iserr, errors = is_error(resp)
+	if iserr:
+		return (False, errors)
+		
+	linode_id = resp['DATA']['LinodeID']
+	return (True, linode_id)
+
+
+
 def delete_node(linode_id, skip_checks):
 	resp = linode_request('linode.delete', 
 		{
@@ -883,6 +902,25 @@ elif (cmd == 'create-node'):
 	print linode_id
 	sys.exit(0)
 
+
+
+elif (cmd == 'update-node'):
+	# Output: The linode ID or nothing on failure
+	# Returns: 0 on success or 1 on failure. Error details on stderr
+	linode_id = int(sys.argv[2])
+	label = sys.argv[3]
+	display_group = sys.argv[4]
+
+	success, data = update_node(linode_id, label, display_group)
+	if not success:
+		print >>sys.stderr, data
+		sys.exit(1)
+	
+	linode_id = data
+	print linode_id
+	sys.exit(0)
+	
+	
 
 elif (cmd == 'delete-node'):
 	# Output: Nothing
