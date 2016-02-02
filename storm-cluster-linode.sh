@@ -131,9 +131,9 @@ create_storm_image() {
 	local temp_linode_id=$linout
 	echo "Created temporary linode $temp_linode_id"
 
-	linode_api linout linerr linret "update-node" $linode_id "stormtmp-$linode_id" "temporary"
+	linode_api linout linerr linret "update-node" $temp_linode_id "stormtmp-$temp_linode_id" "temporary"
 	if [ $linret -eq 1 ]; then
-		echo "Failed to update node label $linode_id. Error:$linerr"
+		echo "Failed to update node label $temp_linode_id. Error:$linerr"
 		return 1
 	fi
 
@@ -762,7 +762,7 @@ create_single_node() {
 	
 	echo "Created linode $__linode_id"
 	
-	linode_api linout linerr linret "update-node" $__linode_id "$7-$linode_id" "$CLUSTER_NAME"
+	linode_api linout linerr linret "update-node" $__linode_id "$7-$__linode_id" "$CLUSTER_NAME"
 	if [ $linret -eq 1 ]; then
 		echo "Failed to update node label $__linode_id. Error:$linerr"
 		return 1
@@ -793,7 +793,7 @@ create_single_node() {
 		echo "Create disk failed."
 		return 1
 	fi
-	echo "Finished creating disk $disk_id from Zookeeper image for linode $__linode_id"
+	echo "Finished creating disk $disk_id from Storm image for linode $__linode_id"
 	
 	# Create a swap disk sized according to the linode's RAM.
 	# The linode distributions are configured to expect /dev/sdb block device

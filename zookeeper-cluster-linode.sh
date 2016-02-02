@@ -119,9 +119,9 @@ create_zk_image() {
 	local temp_linode_id=$linout
 	echo "Created temporary linode $temp_linode_id"
 	
-	linode_api linout linerr linret "update-node" $linode_id "zktmp-$linode_id" "temporary"
+	linode_api linout linerr linret "update-node" $temp_linode_id "zktmp-$temp_linode_id" "temporary"
 	if [ $linret -eq 1 ]; then
-		echo "Failed to update node label $linode_id. Error:$linerr"
+		echo "Failed to update node label $temp_linode_id. Error:$linerr"
 		return 1
 	fi
 	
