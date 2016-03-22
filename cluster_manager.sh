@@ -31,11 +31,12 @@ PLAN_ID=1
 DATACENTER="newark"
 
 # Select a Linux distribution for the cluster manager linode.
-# Currently, this script runs only on Ubuntu distributions.
+# Currently, this script runs only on Ubuntu 14.04 and Debian 8 distributions.
 # Default value of 124 selects Ubuntu 14.04 64-bit LTS (Long Term Support) version.
 # See all available Ubuntu distributions by running these commands in a terminal:
 # 	$ source ./api_env_linode.conf 
 #	$ ./linode_api.py distributions "Ubuntu" table
+#	$ ./linode_api.py distributions "debian" table
 DISTRIBUTION=124
 
 # Select a Linux kernel version for the cluster manager linode.
@@ -51,12 +52,17 @@ KERNEL=138
 # 	'no' enables both public key and password authentication.
 DISABLE_SSH_PASSWORD_AUTHENTICATION=yes
 
+# This label is shown in the Linode Manager UI. 
+# If you plan to create multiple cluster managers, set this to some unique label for each one
+# before creating it.
+CLUSTER_MANAGER_LINODE_LABEL="cluster-manager"
+
 # The default Storm and Zookeeper download URLs.
 STORM_URL='http://www.us.apache.org/dist/storm/apache-storm-0.9.5/apache-storm-0.9.5.tar.gz'
 ZOOKEEPER_URL='http://www.us.apache.org/dist/zookeeper/zookeeper-3.4.6/zookeeper-3.4.6.tar.gz'
 
 # Workaround to avoid "Agent admitted failure to sign using the key." ssh error despite
-# using correct key, due to some conflict with gnone-keyring.
+# using correct key, due to some conflict with gnome-keyring.
 SSH_AUTH_SOCK=0
 export SSH_AUTH_SOCK
 
@@ -102,7 +108,7 @@ create_cluster_manager_linode() {
 	local linode_id=$linout
 	echo "Created cluster manager linode $linode_id"
 
-	linode_api linout linerr linret "update-node" $linode_id "cluster-manager" "cluster-manager"
+	linode_api linout linerr linret "update-node" $linode_id "$CLUSTER_MANAGER_LINODE_LABEL" "cluster-manager"
 	if [ $linret -eq 1 ]; then
 		echo "Failed to update node label $linode_id. Error:$linerr"
 		return 1
@@ -248,13 +254,13 @@ setup_cluster_manager() {
 	apt-get -y update
 	#apt-get -y upgrade
 	
-	apt-get -y install git python2.7 ssh wget sed
+	apt-get -y install git python2.7 ssh wget sed tmux
 	
 	# Create the 'clustermgr' user for running scripts.
 	# It should be part of sudo because script should modify /etc/hosts of cluster manager node
 	# Have to logout and login after adding to sudo to be able to use 'sudo' in commands.
 	addgroup clustermgr
-	adduser --ingroup clustermgr clustermgr
+	adduser --ingroup clustermgr --gecos "" clustermgr
 	adduser clustermgr sudo
 	adduser clustermgr adm
 	
@@ -313,7 +319,7 @@ setup_cluster_manager() {
 	# Create 'clustermgrguest' non-privileged user for devs  to get non-sensitive information about clusters,
 	# such as client node IP addresses.
 	addgroup clustermgrguests
-	adduser --ingroup clustermgrguests clustermgrguest
+	adduser --ingroup clustermgrguests --gecos "" clustermgrguest
 	
 	mkdir -p /home/clustermgrguest/.ssh
 	mkdir -p /home/clustermgrguest/storm-linode

@@ -1215,7 +1215,7 @@ set_hostname() {
 
 	# Just FYI: In case NOPSWD is not configured in /etc/sudoers, then "sudo sh" will fail 
 	# with "sudo: no tty present and no askpass program specified"
-	ssh_command $target_ip $5 $NODE_ROOT_SSH_PRIVATE_KEY sudo sh hostname_manager.sh "change-hostname" $6 $2 $1 $4 $3
+	ssh_command $target_ip $5 $NODE_ROOT_SSH_PRIVATE_KEY sh hostname_manager.sh "change-hostname" $6 $2 $1 $4 $3
 
 	check_hostname=$(ssh_command $target_ip $5 $NODE_ROOT_SSH_PRIVATE_KEY hostname)
 	if [ "x$check_hostname" == "x$1" ]; then
@@ -1299,8 +1299,8 @@ distribute_hostsfile() {
 		remote_copyfile $hostsfile $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY  "$1.hosts"
 		remote_copyfile $zkhostsfile $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY  "$zkcluster.hosts"
 
-		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY sudo sh hostname_manager.sh "hosts-file" $1 "$1.hosts"
-		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY sudo sh hostname_manager.sh "hosts-file" $zkcluster "$zkcluster.hosts"
+		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY sh hostname_manager.sh "hosts-file" $1 "$1.hosts"
+		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY sh hostname_manager.sh "hosts-file" $zkcluster "$zkcluster.hosts"
 		
 	done <<< "$ipaddrs"
 
@@ -1343,29 +1343,30 @@ setup_users_and_authentication_for_image() {
 		echo "Unknown value '$IMAGE_DISABLE_SSH_PASSWORD_AUTHENTICATION' for IMAGE_DISABLE_SSH_PASSWORD_AUTHENTICATION. Leaving defaults unchanged."
 	fi
 	
+	# Since SSH's been restarted wait for sometime before trying next SSH command. Otherwise it randomly fails.
+	sleep 20
+	
 	# Create IMAGE_ADMIN_USER as part of sudo group with password IMAGE_ADMIN_PASSWORD
 	if [ ! -z "$IMAGE_ADMIN_USER" ];  then
 		if [ "$IMAGE_ADMIN_USER" != "root" ]; then
 			echo "Creating admin user $IMAGE_ADMIN_USER"
 			
 			ssh_command $1 $NODE_USERNAME $IMAGE_ROOT_SSH_PRIVATE_KEY \
-				"sudo adduser --ingroup sudo --home /home/$IMAGE_ADMIN_USER --shell /bin/bash --disabled-login $IMAGE_ADMIN_USER"
-			
-			# Set admin user's password.
-			ssh_command $1 $NODE_USERNAME $IMAGE_ROOT_SSH_PRIVATE_KEY \
-				"sudo sh -c \"echo $IMAGE_ADMIN_USER:$IMAGE_ADMIN_PASSWORD|chpasswd\""
+				"adduser --gecos '' $IMAGE_ADMIN_USER; sleep 5; adduser $IMAGE_ADMIN_USER sudo; 
+				echo $IMAGE_ADMIN_USER:$IMAGE_ADMIN_PASSWORD|chpasswd"
+
 
 			# Configure public key authentication for IMAGE_ADMIN_USER.
 			if [ ! -z "$IMAGE_ADMIN_SSH_AUTHORIZED_KEYS" ]; then
 				if [ -f "$IMAGE_ADMIN_SSH_AUTHORIZED_KEYS" ]; then
 					ssh_command $1 $NODE_USERNAME $IMAGE_ROOT_SSH_PRIVATE_KEY \
-						sudo mkdir -p "/home/$IMAGE_ADMIN_USER/.ssh"
+						mkdir -p "/home/$IMAGE_ADMIN_USER/.ssh"
 						
 					remote_copyfile $IMAGE_ADMIN_SSH_AUTHORIZED_KEYS $1 $NODE_USERNAME \
 						$IMAGE_ROOT_SSH_PRIVATE_KEY "/home/$IMAGE_ADMIN_USER/.ssh/authorized_keys"
 			
 					ssh_command $1 $NODE_USERNAME $IMAGE_ROOT_SSH_PRIVATE_KEY \
-						sudo chown "$IMAGE_ADMIN_USER:sudo" "/home/$IMAGE_ADMIN_USER/.ssh/authorized_keys"
+						chown "$IMAGE_ADMIN_USER:$IMAGE_ADMIN_USER" "/home/$IMAGE_ADMIN_USER/.ssh/authorized_keys"
 				fi
 			fi
 		fi
@@ -1376,9 +1377,10 @@ setup_users_and_authentication_for_image() {
 		echo "Creating user $STORM_USER:$STORM_USER"
 		local install_dir=$(storm_install_dir)
 		# --group automatically creates a system group with same name as username.
+		# --gecos "" is to prevent the interactive prompting for full name and other details.
 		ssh_command $1 $NODE_USERNAME $IMAGE_ROOT_SSH_PRIVATE_KEY \
-			sudo adduser --system --group --home $install_dir --no-create-home \
-				--shell /bin/sh --disabled-password --disabled-login $STORM_USER
+			adduser --system --group --home $install_dir --no-create-home \
+				--shell /bin/sh --gecos "" --disabled-password --disabled-login $STORM_USER
 	fi
 	
 }
@@ -1391,12 +1393,12 @@ setup_users_and_authentication_for_image() {
 install_software_on_node() {
 
 	# Update repo information before installing.
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo apt-get -y update
+	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY apt-get -y update
 	
 	if [ "$UPGRADE_OS" == "yes" ]; then
 		echo "Upgrading OS on $1..."
 
-		ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo apt-get -y upgrade
+		ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY apt-get -y upgrade
 	else	
 		echo "Not upgrading OS on $1..."
 	fi
@@ -1404,17 +1406,17 @@ install_software_on_node() {
 
 
 	echo "Installing OpenJDK JRE 7 on $1..."
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo apt-get -y install "openjdk-7-jre-headless"
+	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY apt-get -y install "openjdk-7-jre-headless"
 
 
 
 	echo "Installing Python 2.7 on $1..."
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo apt-get -y install "python2.7"
+	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY apt-get -y install "python2.7"
 
 
 
 	echo "Installing Supervisord on $1..."
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo apt-get -y install supervisor
+	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY apt-get -y install supervisor
 
 
 		
@@ -1441,31 +1443,63 @@ install_software_on_node() {
 	# From https://github.com/Supervisor/supervisor/blob/master/supervisor/supervisorctl.py, supervisor update 
 	# first does the same thing as a reread and then restarts changed programs. So despite what many discussions 
 	# say, there's no need to first reread and then update.
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY "sudo supervisorctl update"
+	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY "supervisorctl update"
 	
 
 	# Install packages required for iptables firewall configuration.
+	# The debconf commands are because iptables-persistent asks interactively to save
+	# existing rules during installation.
 	echo "Installing ipset and iptables-persistent"
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo apt-get -y install ipset iptables-persistent
+	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sh -c \
+		"\"DEBIAN_FRONTEND=noninteractive; export DEBIAN_FRONTEND;
+		echo iptables-persistent iptables-persistent/autosave_v4 boolean false | debconf-set-selections;
+		echo iptables-persistent iptables-persistent/autosave_v6 boolean false | debconf-set-selections;
+		apt-get -y install ipset iptables-persistent\""
 	
 	# Replace the package's init script with the one from 
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo cp /etc/init.d/iptables-persistent /etc/init.d/iptables-persistent.original
-	remote_copyfile "iptables-persistent" $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY /etc/init.d/iptables-persistent
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo chmod +x /etc/init.d/iptables-persistent
+	remote_copyfile "iptables-persistent" $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY '~/iptables-persistent'
 	
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo update-rc.d iptables-persistent enable
+	#ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo cp /etc/init.d/iptables-persistent /etc/init.d/iptables-persistent.original
+	#remote_copyfile "iptables-persistent" $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY /etc/init.d/iptables-persistent
+	#ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo chmod +x /etc/init.d/iptables-persistent
 	
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo /etc/init.d/iptables-persistent save
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo /etc/init.d/iptables-persistent start
+	#ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo update-rc.d iptables-persistent enable
 	
+	#ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo /etc/init.d/iptables-persistent save
+	#ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo /etc/init.d/iptables-persistent start
+	
+	# On Debian 8 + systemd, 'apt-get install iptables-persistent' no longer installs
+	# "iptables-persistent" script but instead calls it "/usr/bin/netfilter-persistent".
+	# A wrapper which calls "/usr/bin/netfilter-persistent" is installed in "/etc/init.d/netfilter-persistent".
+	# "service netfilter-persistent cmd" executes "/etc/init.d/netfilter-persistent" which inturn executes
+	# "/usr/bin/netfilter-persistent".
+	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sh -c \
+		"\"if [ -f '/etc/init.d/iptables-persistent' ]; then 
+		     cp /etc/init.d/iptables-persistent /etc/init.d/iptables-persistent.original;
+	         cp ~/iptables-persistent /etc/init.d/iptables-persistent;
+	         chmod +x /etc/init.d/iptables-persistent;
+	         update-rc.d iptables-persistent enable;
+	         /etc/init.d/iptables-persistent save;
+	         /etc/init.d/iptables-persistent start;
+	     elif [ -f '/usr/sbin/netfilter-persistent' ]; then
+             cp /usr/sbin/netfilter-persistent /usr/sbin/netfilter-persistent.original;
+	         cp ~/iptables-persistent /usr/sbin/netfilter-persistent;
+	         chmod +x /usr/sbin/netfilter-persistent;
+	         update-rc.d -f netfilter-persistent remove;
+			 update-rc.d netfilter-persistent defaults;
+			 update-rc.d netfilter-persistent enable;
+	         service netfilter-persistent save;
+	         service netfilter-persistent start;
+	     fi\""
+
 	
 
 	# Disable IPv6 to keep the firewall configuration tight.
 	echo "Disabling IPv6"
 
 	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY \
-		"sudo sh -c \"echo 'net.ipv6.conf.all.disable_ipv6 = 1' >> /etc/sysctl.conf;echo 'net.ipv6.conf.default.disable_ipv6 = 1' >> /etc/sysctl.conf;echo 'net.ipv6.conf.lo.disable_ipv6 = 1' >> /etc/sysctl.conf\""
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo sysctl -p
+		"sh -c \"echo 'net.ipv6.conf.all.disable_ipv6 = 1' >> /etc/sysctl.conf;echo 'net.ipv6.conf.default.disable_ipv6 = 1' >> /etc/sysctl.conf;echo 'net.ipv6.conf.lo.disable_ipv6 = 1' >> /etc/sysctl.conf\""
+	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sysctl -p
 }
 
 
@@ -1480,7 +1514,7 @@ install_storm_on_node() {
 	local remote_path=$(basename $INSTALL_STORM_DISTRIBUTION)
 	remote_copyfile $INSTALL_STORM_DISTRIBUTION $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY $remote_path
 
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo tar -C $STORM_INSTALL_DIRECTORY -xzf $remote_path
+	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY tar -C $STORM_INSTALL_DIRECTORY -xzf $remote_path
 
 	local install_dir=$(storm_install_dir)
 	
@@ -1494,14 +1528,14 @@ install_storm_on_node() {
 	local storm_local_dir=$(grep 'storm.local.dir' $storm_yaml_template|cut -d ':' -f 2|xargs)
 	echo "Creating Storm local directory $storm_local_dir"
 	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY \
-		"sudo sh -c \"mkdir -p $storm_local_dir;chown -R $STORM_USER:$STORM_USER $storm_local_dir\""
+		"sh -c \"mkdir -p $storm_local_dir;chown -R $STORM_USER:$STORM_USER $storm_local_dir\""
 	
 	# Create the Storm log directory specified in storm.yaml.
 	# The xargs at the end is to trim enclosing whitespaces.
 	local storm_log_dir=$(grep 'storm.log.dir' $storm_yaml_template|cut -d ':' -f 2|xargs)
 	echo "Creating Storm log directory $storm_log_dir"
 	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY \
-		"sudo sh -c \"mkdir -p $storm_log_dir;chown -R $STORM_USER:$STORM_USER $storm_log_dir\""
+		"sh -c \"mkdir -p $storm_log_dir;chown -R $STORM_USER:$STORM_USER $storm_log_dir\""
 	
 	# Copy template storm.yaml to installation directory.
 	local remote_yaml_path=$install_dir/conf/storm.yaml
@@ -1510,7 +1544,7 @@ install_storm_on_node() {
 	
 	# Transfer ownership of the installed directory to ssh user for simplicity.
 	echo "Storm installed in $install_dir. Changing owner to $STORM_USER:$STORM_USER..."
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY "sudo chown -R $STORM_USER:$STORM_USER $install_dir"
+	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY "chown -R $STORM_USER:$STORM_USER $install_dir"
 
 }
 
@@ -1651,18 +1685,18 @@ start_storm() {
 			
 			echo "Starting nimbus service on $node [$target_ip]..."
 			nimbus_ipaddr=$target_ip
-			ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "sudo supervisorctl start storm-nimbus"
+			ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "supervisorctl start storm-nimbus"
 	
 		elif [ "$role" == "supervisor" ]; then
 
 			echo "Starting supervisor service on $node [$target_ip]..."
-			ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "sudo supervisorctl start storm-supervisor storm-logviewer"
+			ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "supervisorctl start storm-supervisor storm-logviewer"
 
 		elif [ "$role" == "client" ]; then
 
 			# Storm ui can be installed on any machine, not mandatory on nimbus.
 			echo "Starting ui service on client $node [$target_ip]..."
-			ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "sudo supervisorctl start storm-ui"
+			ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "supervisorctl start storm-ui"
 		fi
 
 	done <<< "$nodes"
@@ -1682,7 +1716,7 @@ start_storm() {
 		local check_count=1
 		local nimbus_ready=0
 		while [ $check_count -le $max_checks ]; do
-			ssh_command $nimbus_ipaddr $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "sudo netstat -anp | grep java | grep $nimbus_port"
+			ssh_command $nimbus_ipaddr $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "netstat -anp | grep java | grep $nimbus_port"
 			if [ $? -eq 0 ]; then
 				echo "Nimbus is ready"
 				nimbus_ready=1
@@ -1735,7 +1769,7 @@ stop_storm() {
 		fi
 		
 		echo "Stopping supervisor service on $supervisor_node [$target_ip]..."
-		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "sudo supervisorctl stop storm-supervisor"
+		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "supervisorctl stop storm-supervisor"
 		
 		sleep 20
 	done <<< "$supervisor_nodes"
@@ -1753,7 +1787,7 @@ stop_storm() {
 		fi
 		
 		echo "Stopping logviewer service on $supervisor_node [$target_ip]..."
-		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "sudo supervisorctl stop storm-logviewer"
+		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "supervisorctl stop storm-logviewer"
 	done <<< "$supervisor_nodes"
 
 
@@ -1770,7 +1804,7 @@ stop_storm() {
 			target_ip=$public_ip
 		fi
 		echo "Stopping ui service on $client_node [$target_ip]..."
-		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "sudo supervisorctl stop storm-ui"
+		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "supervisorctl stop storm-ui"
 	done <<< "$client_nodes"
 
 
@@ -1778,7 +1812,7 @@ stop_storm() {
 
 	local nimbus_ipaddr=$(get_nimbus_node_ipaddr)
 	echo "Stopping nimbus service on nimbus node $nimbus_ipaddr..."
-	ssh_command $nimbus_ipaddr $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "sudo supervisorctl stop storm-nimbus"
+	ssh_command $nimbus_ipaddr $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "supervisorctl stop storm-nimbus"
 	# Wait for nimbus service to shutdown cleanly. Shutdown is quick if there are no topologies running, but
 	# slower if there are because nimbus has to first shutdown the topologies.
 	echo "Waiting for nimbus node services to stop..."
@@ -2006,7 +2040,7 @@ install_client_reverse_proxy() {
 	# Sending it from client node means cluster manager need not be in the client
 	# whitelist.
 	ssh_command $client_node_ssh_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY \
-		"sudo sh -c \"apt-get -y update;apt-get -y install apache2 curl\""
+		"sh -c \"apt-get -y update;apt-get -y install apache2 curl\""
 	
 	# We need to enable the following apache modules:
 	# - "proxy" and proxy_http to make apache act as reverse proxy for storm-ui webapp, 
@@ -2019,7 +2053,7 @@ install_client_reverse_proxy() {
 	#
 	# - "headers" to unset the accept-encoding gzip header, without which substitute
 	#   doesn't work.
-	ssh_command $client_node_ssh_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY sudo a2enmod proxy proxy_http substitute headers
+	ssh_command $client_node_ssh_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY a2enmod proxy proxy_http substitute headers
 }
 
 
@@ -2082,9 +2116,9 @@ configure_client_reverse_proxy() {
 	done <<< "$nodes"
 	
 	remote_copyfile $storm_proxy_conf $client_node_ssh_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY /etc/apache2/conf-available/stormproxy.conf
-	ssh_command $client_node_ssh_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY sudo a2enconf stormproxy.conf
+	ssh_command $client_node_ssh_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY a2enconf stormproxy.conf
 	
-	ssh_command $client_node_ssh_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY sudo service apache2 restart
+	ssh_command $client_node_ssh_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY service apache2 restart
 }
 	
 
@@ -2241,9 +2275,22 @@ distribute_cluster_security_configurations() {
 		# So for correct reloading, we have to "ipset destroy" all sets, and then reload.
 		# But "ipset destroy" is not allowed as long as a set is in use by iptables rule.
 		# So iptables has to be flushed first.
-		# ssh_command $target_ip $NODE_USERNAME "sudo sh -c \"iptables -F;ipset destroy;/etc/init.d/iptables-persistent reload\""
-		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY \
-			"sudo sh -c \"/etc/init.d/iptables-persistent flush;/etc/init.d/iptables-persistent reload\""
+		# ssh_command $target_ip $NODE_USERNAME "sh -c \"iptables -F;ipset destroy;/etc/init.d/iptables-persistent reload\""
+		#
+		# On Debian 8 + systemd, 'apt-get install iptables-persistent' no longer installs
+		# "iptables-persistent" script but instead calls it "/usr/bin/netfilter-persistent".
+		# A wrapper which calls "/usr/bin/netfilter-persistent" is installed in "/etc/init.d/netfilter-persistent"
+		# "service netfilter-persistent cmd" executes "/etc/init.d/netfilter-persistent" which inturn executes
+		# "/usr/bin/netfilter-persistent".
+		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY sh -c \
+			"\"if [ -f '/etc/init.d/iptables-persistent' ]; then
+			     /etc/init.d/iptables-persistent flush;
+			     /etc/init.d/iptables-persistent reload;
+			 elif [ -f '/usr/sbin/netfilter-persistent' ]; then
+				 service netfilter-persistent flush;
+			     service netfilter-persistent reload;
+			 fi\""
+
 		
 	done <<< "$nodes"
 	
@@ -2303,8 +2350,22 @@ update_client_user_whitelist() {
 	remote_copyfile $ipsets_file_for_client_node $client_node_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY /etc/iptables/rules.ipsets
 	
 	# Apply the firewall configuration immediately.
-	ssh_command $client_node_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY \
-		"sudo sh -c \"/etc/init.d/iptables-persistent flush;/etc/init.d/iptables-persistent reload\""
+	#ssh_command $client_node_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY \
+	#	"sh -c \"/etc/init.d/iptables-persistent flush;/etc/init.d/iptables-persistent reload\""
+	
+	# On Debian 8 + systemd, 'apt-get install iptables-persistent' no longer installs
+	# "iptables-persistent" script but instead calls it "/usr/bin/netfilter-persistent".
+	# A wrapper which calls "/usr/bin/netfilter-persistent" is installed in "/etc/init.d/netfilter-persistent"
+	# "service netfilter-persistent cmd" executes "/etc/init.d/netfilter-persistent" which inturn executes
+	# "/usr/bin/netfilter-persistent".
+	ssh_command $client_node_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY sh -c \
+		"\"if [ -f '/etc/init.d/iptables-persistent' ]; then
+			 /etc/init.d/iptables-persistent flush;
+			 /etc/init.d/iptables-persistent reload;
+		 elif [ -f '/usr/sbin/netfilter-persistent' ]; then
+			 service netfilter-persistent flush;
+			 service netfilter-persistent reload;
+		 fi\""
 	
 	echo "Finished updating client user whitelist"
 	

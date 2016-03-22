@@ -198,13 +198,13 @@ create_zk_image() {
 	echo "IP address: $ipaddr"
 	
 	setup_users_and_authentication_for_image $ipaddr
-	
+
 	#echo "Installing prerequisite software"
 	install_software_on_node $ipaddr $NODE_USERNAME
 
 	#echo "Installing Zookeeper software"
 	install_zookeeper_on_node $ipaddr $NODE_USERNAME
-
+	
 	# Shutdown the linode.
 	echo "Shutting down the linode"
 	linode_api linout linerr linret "shutdown" $temp_linode_id
@@ -1002,7 +1002,7 @@ set_hostname() {
 
 	# Just FYI: In case NOPSWD is not configured in /etc/sudoers, then "sudo sh" will fail 
 	# with "sudo: no tty present and no askpass program specified"
-	ssh_command $target_ip $5 $NODE_ROOT_SSH_PRIVATE_KEY sudo sh hostname_manager.sh "change-hostname" $6 $2 $1 $4 $3
+	ssh_command $target_ip $5 $NODE_ROOT_SSH_PRIVATE_KEY sh hostname_manager.sh "change-hostname" $6 $2 $1 $4 $3
 
 	check_hostname=$(ssh_command $target_ip $5 $NODE_ROOT_SSH_PRIVATE_KEY hostname)
 	if [ "x$check_hostname" == "x$1" ]; then
@@ -1070,7 +1070,7 @@ distribute_hostsfile() {
 		remote_copyfile ./hostname_manager.sh $target_ip $NODE_USERNAME  $NODE_ROOT_SSH_PRIVATE_KEY hostname_manager.sh
 		remote_copyfile $hostsfile $target_ip $NODE_USERNAME  $NODE_ROOT_SSH_PRIVATE_KEY "$CLUSTER_NAME.hosts"
 
-		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY sudo sh hostname_manager.sh "hosts-file" $1 "$CLUSTER_NAME.hosts"
+		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY sh hostname_manager.sh "hosts-file" $1 "$CLUSTER_NAME.hosts"
 		
 	done <<< "$ipaddrs"
 
@@ -1113,29 +1113,29 @@ setup_users_and_authentication_for_image() {
 		echo "Unknown value '$IMAGE_DISABLE_SSH_PASSWORD_AUTHENTICATION' for IMAGE_DISABLE_SSH_PASSWORD_AUTHENTICATION. Leaving defaults unchanged."
 	fi
 	
+	# Since SSH's been restarted wait for sometime before trying next SSH command. Otherwise it randomly fails.
+	sleep 20
+	
 	# Create IMAGE_ADMIN_USER as part of sudo group with password IMAGE_ADMIN_PASSWORD
 	if [ ! -z "$IMAGE_ADMIN_USER" ];  then
 		if [ "$IMAGE_ADMIN_USER" != "root" ]; then
 			echo "Creating admin user $IMAGE_ADMIN_USER"
 			
 			ssh_command $1 $NODE_USERNAME $IMAGE_ROOT_SSH_PRIVATE_KEY \
-				"sudo adduser --ingroup sudo --home /home/$IMAGE_ADMIN_USER --shell /bin/bash --disabled-login $IMAGE_ADMIN_USER"
+				"adduser --gecos '' $IMAGE_ADMIN_USER; sleep 5; adduser $IMAGE_ADMIN_USER sudo; 
+				echo $IMAGE_ADMIN_USER:$IMAGE_ADMIN_PASSWORD|chpasswd"
 			
-			# Set admin user's password.
-			ssh_command $1 $NODE_USERNAME $IMAGE_ROOT_SSH_PRIVATE_KEY \
-				"sudo sh -c \"echo $IMAGE_ADMIN_USER:$IMAGE_ADMIN_PASSWORD|chpasswd\""
-
 			# Configure public key authentication for IMAGE_ADMIN_USER.
 			if [ ! -z "$IMAGE_ADMIN_SSH_AUTHORIZED_KEYS" ]; then
 				if [ -f "$IMAGE_ADMIN_SSH_AUTHORIZED_KEYS" ]; then
 					ssh_command $1 $NODE_USERNAME $IMAGE_ROOT_SSH_PRIVATE_KEY \
-						sudo mkdir -p "/home/$IMAGE_ADMIN_USER/.ssh"
+						mkdir -p "/home/$IMAGE_ADMIN_USER/.ssh"
 						
 					remote_copyfile $IMAGE_ADMIN_SSH_AUTHORIZED_KEYS $1 $NODE_USERNAME \
 						$IMAGE_ROOT_SSH_PRIVATE_KEY "/home/$IMAGE_ADMIN_USER/.ssh/authorized_keys"
 			
 					ssh_command $1 $NODE_USERNAME $IMAGE_ROOT_SSH_PRIVATE_KEY \
-						sudo chown "$IMAGE_ADMIN_USER:sudo" "/home/$IMAGE_ADMIN_USER/.ssh/authorized_keys"
+						chown -R "$IMAGE_ADMIN_USER:$IMAGE_ADMIN_USER" "/home/$IMAGE_ADMIN_USER/.ssh"
 				fi
 			fi
 		fi
@@ -1146,8 +1146,9 @@ setup_users_and_authentication_for_image() {
 		echo "Creating user $ZOOKEEPER_USER:$ZOOKEEPER_USER"
 		local install_dir=$(zk_install_dir)
 		# --group automatically creates a system group with same name as username.
+		# --gecos "" is to prevent the interactive prompting for full name and other details.
 		ssh_command $1 $NODE_USERNAME $IMAGE_ROOT_SSH_PRIVATE_KEY \
-			sudo adduser --system --group --home $install_dir --no-create-home --shell /bin/sh \
+			adduser --system --group --home $install_dir --gecos "" --no-create-home --shell /bin/sh \
 				--disabled-password --disabled-login $ZOOKEEPER_USER
 	fi
 	
@@ -1159,12 +1160,12 @@ setup_users_and_authentication_for_image() {
 install_software_on_node() {
 	
 	# Update repo information before installing.
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo apt-get -y update
+	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY apt-get -y update
 	
 	if [ "$UPGRADE_OS" == "yes" ]; then
 		echo "Upgrading OS on $1..."
 
-		ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo apt-get -y upgrade
+		ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY apt-get -y upgrade
 	else	
 		echo "Not upgrading OS on $1..."
 	fi
@@ -1172,13 +1173,13 @@ install_software_on_node() {
 
 
 	echo "Installing OpenJDK JRE 7 on $1..."
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo apt-get -y install openjdk-7-jre-headless
+	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY apt-get -y install openjdk-7-jre-headless
 
 
 
 	# Install service supervisor package
 	echo "Installing Supervisord on $1..."
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo apt-get -y install supervisor
+	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY apt-get -y install supervisor
 	
 	local image_supervisord_conf="$IMAGE_CONF_DIR/zk-supervisord.conf"
 	# Replace occurrences of $ZOOKEEPER_USER with its value. The sed is not passed with -r because $ is special
@@ -1195,31 +1196,62 @@ install_software_on_node() {
 	# From https://github.com/Supervisor/supervisor/blob/master/supervisor/supervisorctl.py, supervisor update 
 	# first does the same thing as a reread and then restarts changed programs. So despite what many discussions 
 	# say, there's no need to first reread and then update.
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY "sudo supervisorctl update"
+	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY "supervisorctl update"
 	
 
 	# Install packages required for iptables firewall configuration.
+	# The debconf commands are because iptables-persistent asks interactively to save
+	# existing rules during installation.
 	echo "Installing ipset and iptables-persistent"
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo apt-get -y install ipset iptables-persistent
+	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sh -c \
+		"DEBIAN_FRONTEND=noninteractive; export DEBIAN_FRONTEND;
+		echo iptables-persistent iptables-persistent/autosave_v4 boolean false | debconf-set-selections;
+		echo iptables-persistent iptables-persistent/autosave_v6 boolean false | debconf-set-selections;
+		apt-get -y install ipset iptables-persistent"
 	
 	# Replace the package's init script with the one from 
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo cp /etc/init.d/iptables-persistent /etc/init.d/iptables-persistent.original
-	remote_copyfile "iptables-persistent" $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY /etc/init.d/iptables-persistent
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo chmod +x /etc/init.d/iptables-persistent
+	remote_copyfile "iptables-persistent" $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY '~/iptables-persistent'
 	
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo update-rc.d iptables-persistent enable
+	#ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo cp /etc/init.d/iptables-persistent /etc/init.d/iptables-persistent.original
+	#remote_copyfile "iptables-persistent" $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY /etc/init.d/iptables-persistent
+	#ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo chmod +x /etc/init.d/iptables-persistent
 	
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo /etc/init.d/iptables-persistent save
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo /etc/init.d/iptables-persistent start
+	#ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo update-rc.d iptables-persistent enable
+	
+	#ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo /etc/init.d/iptables-persistent save
+	#ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo /etc/init.d/iptables-persistent start
 
-	
+	# On Debian 8 + systemd, 'apt-get install iptables-persistent' no longer installs
+	# "iptables-persistent" script but instead calls it "/usr/bin/netfilter-persistent".
+	# A wrapper which calls "/usr/bin/netfilter-persistent" is installed in "/etc/init.d/netfilter-persistent".
+	# "service netfilter-persistent cmd" executes "/etc/init.d/netfilter-persistent" which inturn executes
+	# "/usr/bin/netfilter-persistent".
+	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sh -c \
+		"\"if [ -f '/etc/init.d/iptables-persistent' ]; then 
+		     cp /etc/init.d/iptables-persistent /etc/init.d/iptables-persistent.original;
+	         cp ~/iptables-persistent /etc/init.d/iptables-persistent;
+	         chmod +x /etc/init.d/iptables-persistent;
+	         update-rc.d iptables-persistent enable;
+	         /etc/init.d/iptables-persistent save;
+	         /etc/init.d/iptables-persistent start;
+	     elif [ -f '/usr/sbin/netfilter-persistent' ]; then
+             cp /usr/sbin/netfilter-persistent /usr/sbin/netfilter-persistent.original;
+	         cp ~/iptables-persistent /usr/sbin/netfilter-persistent;
+	         chmod +x /usr/sbin/netfilter-persistent;
+	         update-rc.d -f netfilter-persistent remove;
+			 update-rc.d netfilter-persistent defaults;
+			 update-rc.d netfilter-persistent enable;
+	         service netfilter-persistent save;
+	         service netfilter-persistent start;
+	     fi\""
+
 	
 	# Disable IPv6 to keep the firewall configuration tight.
 	echo "Disabling IPv6"
 
 	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY \
-		"sudo sh -c \"echo 'net.ipv6.conf.all.disable_ipv6 = 1' >> /etc/sysctl.conf;echo 'net.ipv6.conf.default.disable_ipv6 = 1' >> /etc/sysctl.conf;echo 'net.ipv6.conf.lo.disable_ipv6 = 1' >> /etc/sysctl.conf\""
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo sysctl -p
+		"sh -c \"echo 'net.ipv6.conf.all.disable_ipv6 = 1' >> /etc/sysctl.conf;echo 'net.ipv6.conf.default.disable_ipv6 = 1' >> /etc/sysctl.conf;echo 'net.ipv6.conf.lo.disable_ipv6 = 1' >> /etc/sysctl.conf\""
+	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sysctl -p
 }
 
 
@@ -1234,7 +1266,7 @@ install_zookeeper_on_node() {
 	local remote_path=$(basename $INSTALL_ZOOKEEPER_DISTRIBUTION)
 	remote_copyfile $INSTALL_ZOOKEEPER_DISTRIBUTION $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY $remote_path
 
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sudo tar -C $ZOOKEEPER_INSTALL_DIRECTORY -xzf $remote_path
+	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY tar -C $ZOOKEEPER_INSTALL_DIRECTORY -xzf $remote_path
 
 	# The tr -s / combines multiple slashes into a single slash.
 	local install_dir=$(zk_install_dir)
@@ -1246,7 +1278,7 @@ install_zookeeper_on_node() {
 	# So parsing it instead.
 	local dataDir=$(grep 'dataDir=' "$IMAGE_CONF_DIR/zoo.cfg"|cut -d '=' -f 2)
 	echo "Creating ZK data directory $dataDir"
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY "sudo sh -c \"mkdir -p $dataDir;chown -R $ZOOKEEPER_USER:$ZOOKEEPER_USER $dataDir\""
+	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY "sh -c \"mkdir -p $dataDir;chown -R $ZOOKEEPER_USER:$ZOOKEEPER_USER $dataDir\""
 	
 	# Copy template zoo.cfg to installation directory.
 	local remote_cfg_path=$install_dir/conf/zoo.cfg
@@ -1272,7 +1304,7 @@ install_zookeeper_on_node() {
 		max_heap="768M"
 	fi
 	local java_env_contents="export JVMFLAGS=\'-Xms$min_heap -Xmx$max_heap\'"
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY "sudo sh -c \"echo $java_env_contents > $install_dir/conf/java.env\""
+	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY "sh -c \"echo $java_env_contents > $install_dir/conf/java.env\""
 
 	# ZK logging is seriously screwed up.
 	# It has a conf/log4j.properties with properties like zookeeper.log.dir that at first looks like the
@@ -1299,15 +1331,15 @@ install_zookeeper_on_node() {
 		log_dir=$install_dir/$log_dir
 	fi
 	echo "Creating ZK logging directory $log_dir"
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY "sudo sh -c \"mkdir -p $log_dir;chown -R $ZOOKEEPER_USER:$ZOOKEEPER_USER $log_dir\""
+	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY "sh -c \"mkdir -p $log_dir;chown -R $ZOOKEEPER_USER:$ZOOKEEPER_USER $log_dir\""
 
 	# Create conf/zookeeper-env.sh and set the logging variables used by zkServer.sh.
 	local root_logger_value=$(grep '^log4j.rootLogger' "$IMAGE_CONF_DIR/log4j.properties" | head -1 | cut -d '=' -f 2)
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY "sudo sh -c \"printf 'export ZOO_LOG_DIR=$log_dir\nexport ZOO_LOG4J_PROP=$remote_log4j_path\n' > $install_dir/conf/zookeeper-env.sh\""
+	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY "sh -c \"printf 'export ZOO_LOG_DIR=$log_dir\nexport ZOO_LOG4J_PROP=$remote_log4j_path\n' > $install_dir/conf/zookeeper-env.sh\""
 
 	# Transfer ownership of the installed directory to zk user.
 	echo "Changing ownership of $install_dir to $ZOOKEEPER_USER..."
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY "sudo chown -R $ZOOKEEPER_USER:$ZOOKEEPER_USER $install_dir"
+	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY "chown -R $ZOOKEEPER_USER:$ZOOKEEPER_USER $install_dir"
 }
 
 
@@ -1458,7 +1490,7 @@ distribute_zk_configuration() {
 			fi
 			
 			local java_env_contents="export JVMFLAGS=\'-Xms${min_heap}M -Xmx${max_heap}M\'"
-			ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "sudo sh -c \"echo $java_env_contents > $install_dir/conf/java.env\""
+			ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "sh -c \"echo $java_env_contents > $install_dir/conf/java.env\""
 		fi
 		
 	done <<< "$ipaddrs"
@@ -1601,8 +1633,19 @@ distribute_cluster_security_configurations() {
 		
 		# Apply the firewall configuration immediately.
 		# The flush is to remove iptables rule that refer to a ipset, because we can't delete ipset otherwise.
-		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY \
-			"sudo sh -c \"/etc/init.d/iptables-persistent flush;/etc/init.d/iptables-persistent reload\""
+		# On Debian 8 + systemd, 'apt-get install iptables-persistent' no longer installs
+		# "iptables-persistent" script but instead calls it "/usr/bin/netfilter-persistent".
+		# A wrapper which calls "/usr/bin/netfilter-persistent" is installed in "/etc/init.d/netfilter-persistent"
+		# "service netfilter-persistent cmd" executes "/etc/init.d/netfilter-persistent" which inturn executes
+		# "/usr/bin/netfilter-persistent".
+		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY sh -c \
+			"\"if [ -f '/etc/init.d/iptables-persistent' ]; then
+			     /etc/init.d/iptables-persistent flush;
+			     /etc/init.d/iptables-persistent reload;
+			 elif [ -f '/usr/sbin/netfilter-persistent' ]; then
+				 service netfilter-persistent flush;
+			     service netfilter-persistent reload;
+			 fi\""
 		
 	done <<< "$ipaddrs"
 }
@@ -1785,7 +1828,7 @@ start_zookeeper() {
 		
 		# When running under supervision, according to https://groups.google.com/d/msg/storm-user/_L6i2JLjQwA/H1LMX2s6JV4J,
 		# it's preferable to use start-foreground (this is configured in zk-supervisord.conf)
-		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "sudo supervisorctl start zookeeper"
+		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "supervisorctl start zookeeper"
 	done <<< "$ipaddrs"
 }
 
@@ -1813,7 +1856,7 @@ stop_zookeeper() {
 
 		echo "Stopping zookeeper service on $linode_id [$target_ip]..."
 
-		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "sudo supervisorctl stop zookeeper"
+		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "supervisorctl stop zookeeper"
 
 
 		# Give some time for each node to become aware of another node stopping
@@ -2491,7 +2534,7 @@ case $1 in
 	kernels)
 	list_kernels $2 $3
 	;;
-
+	
 	*)
 	echo "Unknown command: $1"
 	;;
