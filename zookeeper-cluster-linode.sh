@@ -79,7 +79,7 @@ create_new_image_conf() {
 #	$2 : Name of API environment configuration file containing API endpoint and key.
 create_zk_image() {
 	if [ ! -f $1 ]; then
-		printf "Configuration file $1 not found.\nUsage: zookeeper-cluster-linode.sh create-template CONF-FILE\n"
+		printf "Configuration file $1 not found.\nUsage: zookeeper-cluster-linode.sh create-image CONF-FILE API-ENV-FILE\n"
 		return 1
 	fi
 
@@ -108,6 +108,15 @@ create_zk_image() {
 	
 	NODE_USERNAME=root
 	
+	local stfile=$(image_status_file)
+	if [ -f "$stfile" ]; then
+		# Status file already exist, which means image is partially/fully created.
+		echo "Image is already created or is being created. Nothing further to do..."
+		return 1
+	fi
+	
+	create_image_status_file
+
 	# Create temporary linode of lowest cost plan in specified datacenter.
 	echo "Creating temporary linode"
 	local linout linerr linret
@@ -252,6 +261,9 @@ create_zk_image() {
 		return 1
 	fi
 	echo "Template image $image_id successfully created"
+
+	add_section $stfile "image"
+	insert_bottom_of_section $stfile "image" "$image_id"
 	
 	# delete temporary linode. 'skipchecks' is 1 (true) because it's much 
 	# easier than detaching disk from config and then deleting.
@@ -264,6 +276,56 @@ create_zk_image() {
 	
 
 	printf "\n\nFinished creating Zookeeper template image $image_id\n"
+	return 0
+}
+
+
+
+# 	$1 : Name of configuration file containing base node spec, template node spec, install flags and any other
+#		 common configuration options.
+#	$2 : Name of API environment configuration file containing API endpoint and key.
+delete_zk_image() {
+	if [ ! -f $1 ]; then
+		printf "Configuration file $1 not found.\nUsage: zookeeper-cluster-linode.sh delete-image CONF-FILE API-ENV-FILE\n"
+		return 1
+	fi
+
+	# Absolute paths of this script's directory, and the image conf file's directory.
+	SCRIPT_DIR="$(pwd)"
+	IMAGE_CONF_FILE="$(readlink -m $1)"
+	IMAGE_CONF_DIR="$(dirname $IMAGE_CONF_FILE)"
+	
+	echo "SCRIPT_DIR=$SCRIPT_DIR"
+	echo "IMAGE_CONF_DIR=$IMAGE_CONF_DIR"
+	echo "IMAGE_CONF_FILE=$IMAGE_CONF_FILE"
+	
+
+	# Include API endpoint configuration file.
+	. $2
+	validate_api_env_configuration
+	if [ $? -eq 1 ]; then
+		return 1
+	fi
+	
+	local stfile=$(image_status_file)
+	if [ ! -f "$stfile" ]; then
+		# Status file does not exist, which means image is probably not created.
+		echo "Image does not exist. Nothing further to do..."
+		return 1
+	fi
+	
+	local image_id=$(get_section $stfile "image")
+	echo "Deleting image $image_id"
+	local linout linerr linret
+	linode_api linout linerr linret "delete-image" $image_id
+	if [ $linret -eq 1 ]; then
+		echo "Failed to delete image $image_id. Error:$linerr"
+		return 1
+	fi
+	
+	rm -f "$stfile"
+
+	printf "\n\nFinished deleting Zookeeper image $image_id\n"
 	return 0
 }
 
@@ -2425,6 +2487,22 @@ status_file() {
 
 
 
+create_image_status_file() {
+	local stfile=$(image_status_file)
+	if [ ! -f "$stfile" ]; then
+		touch "$stfile"
+	fi
+}
+
+
+
+image_status_file() {
+	local image_name=$(basename "$IMAGE_CONF_FILE"|sed -r 's/.conf//')
+	echo "$IMAGE_CONF_DIR/$image_name.info"
+}
+
+
+
 #	$1 -> Path of local file to copy
 #	$2 -> IP address or hostname of node
 #	$3 -> SSH login username for node
@@ -2469,6 +2547,10 @@ case $1 in
 
 	create-image)
 	create_zk_image $2 $3
+	;;
+
+	delete-image)
+	delete_zk_image $2 $3
 	;;
 
 	new-cluster-conf)

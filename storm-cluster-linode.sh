@@ -90,7 +90,7 @@ create_new_image_conf() {
 #	$2 : Name of API environment configuration file containing API endpoint and key.
 create_storm_image() {
 	if [ ! -f $1 ]; then
-		printf "Configuration file $1 not found.\nUsage: storm-cluster-linode.sh create-template CONF-FILE API-ENV-FILE\n"
+		printf "Configuration file $1 not found.\nUsage: storm-cluster-linode.sh create-image CONF-FILE API-ENV-FILE\n"
 		return 1
 	fi
 
@@ -119,6 +119,15 @@ create_storm_image() {
 	fi
 	
 	NODE_USERNAME=root
+	
+	local stfile=$(image_status_file)
+	if [ -f "$stfile" ]; then
+		# Status file already exist, which means image is partially/fully created.
+		echo "Image is already created or is being created. Nothing further to do..."
+		return 1
+	fi
+	
+	create_image_status_file
 	
 	# Create temporary linode of lowest cost plan in specified datacenter.
 	echo "Creating temporary linode"
@@ -262,7 +271,10 @@ create_storm_image() {
 		return 1
 	fi
 	echo "Template image $image_id successfully created"
-	
+
+	add_section $stfile "image"
+	insert_bottom_of_section $stfile "image" "$image_id"
+		
 	# delete temporary linode. 'skipchecks' is 1 (true) because it's much 
 	# easier than detaching disk from config and then deleting.
 	echo "Deleting the temporary linode $temp_linode_id"
@@ -271,7 +283,6 @@ create_storm_image() {
 		echo "Failed to delete temporary linode. Error:$linerr"
 		return 1
 	fi
-	
 
 	printf "\n\nFinished creating Storm template image $image_id\n"
 	return 0
@@ -279,6 +290,53 @@ create_storm_image() {
 
 
 
+# 	$1 : Name of configuration file containing base node spec, template node spec, install flags and any other
+#		 common configuration options.
+#	$2 : Name of API environment configuration file containing API endpoint and key.
+delete_storm_image() {
+	if [ ! -f $1 ]; then
+		printf "Configuration file $1 not found.\nUsage: storm-cluster-linode.sh delete-image CONF-FILE API-ENV-FILE\n"
+		return 1
+	fi
+
+	# Absolute paths of this script's directory, and the image conf file's directory.
+	SCRIPT_DIR="$(pwd)"
+	IMAGE_CONF_FILE="$(readlink -m $1)"
+	IMAGE_CONF_DIR="$(dirname $IMAGE_CONF_FILE)"
+	
+	echo "SCRIPT_DIR=$SCRIPT_DIR"
+	echo "IMAGE_CONF_DIR=$IMAGE_CONF_DIR"
+	echo "IMAGE_CONF_FILE=$IMAGE_CONF_FILE"
+	
+
+	# Include API endpoint configuration file.
+	. $2
+	validate_api_env_configuration
+	if [ $? -eq 1 ]; then
+		return 1
+	fi
+	
+	local stfile=$(image_status_file)
+	if [ ! -f "$stfile" ]; then
+		# Status file does not exist, which means image is probably not created.
+		echo "Image does not exist. Nothing further to do..."
+		return 1
+	fi
+	
+	local image_id=$(get_section $stfile "image")
+	echo "Deleting image $image_id"
+	local linout linerr linret
+	linode_api linout linerr linret "delete-image" $image_id
+	if [ $linret -eq 1 ]; then
+		echo "Failed to delete image $image_id. Error:$linerr"
+		return 1
+	fi
+	
+	rm -f "$stfile"
+
+	printf "\n\nFinished deleting Storm image $image_id\n"
+	return 0
+}
 
 
 # $1 : Cluster directory name
@@ -2893,6 +2951,14 @@ get_conf_status() {
 }
 
 
+create_image_status_file() {
+	local stfile=$(image_status_file)
+	if [ ! -f "$stfile" ]; then
+		touch "$stfile"
+	fi
+}
+
+
 get_nimbus_node_ipaddr() {
 	local stfile=$(status_file)
 	local nimbus_node=$(get_section $stfile "nodes" | grep ':nimbus' | cut -d ':' -f1)
@@ -2940,6 +3006,13 @@ get_ui_port() {
 
 status_file() {
 	echo "$CLUSTER_CONF_DIR/$CLUSTER_NAME.info"
+}
+
+
+
+image_status_file() {
+	local image_name=$(basename "$IMAGE_CONF_FILE"|sed -r 's/.conf//')
+	echo "$IMAGE_CONF_DIR/$image_name.info"
 }
 
 
@@ -3060,6 +3133,10 @@ case $1 in
 
 	create-image)
 	create_storm_image $2 $3
+	;;
+	
+	delete-image)
+	delete_storm_image $2 $3
 	;;
 
 	new-cluster-conf)
