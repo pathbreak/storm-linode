@@ -222,6 +222,9 @@ create_cluster_manager_linode() {
 		return 1
 	fi
 	
+	# If scp is attempted too quickly after boot, it's failing with connection refused.
+	sleep 15
+	
 	echo "Cluster manager node has booted. Public IP address: $public_ip"
 	
 	echo "Copying cluster_manager.sh to cluster manager node"
