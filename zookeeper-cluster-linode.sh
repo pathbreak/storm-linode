@@ -1175,8 +1175,30 @@ setup_users_and_authentication_for_image() {
 		echo "Unknown value '$IMAGE_DISABLE_SSH_PASSWORD_AUTHENTICATION' for IMAGE_DISABLE_SSH_PASSWORD_AUTHENTICATION. Leaving defaults unchanged."
 	fi
 	
-	# Since SSH's been restarted wait for sometime before trying next SSH command. Otherwise it randomly fails.
+	# Since SSH's been restarted wait for sometime before trying next SSH command. Otherwise next ssh/scp command sometimes fails.
+	# Also on production Linode, SSH service may take upto 60-80 seconds to become available again after restart. So keep trying
+	# to SSH until it succeeds.
 	sleep 20
+	
+	local max_checks=24
+	local wait_between_checks=10
+	local check_count=1
+	local ssh_available=0
+	while [ $check_count -le $max_checks ]; do
+		ssh_command $1 $NODE_USERNAME $IMAGE_ROOT_SSH_PRIVATE_KEY echo
+		if [ $? -eq 0 ]; then
+			echo "SSH is available after restart"
+			ssh_available=1
+			break
+		fi
+		check_count=$((check_count+1))
+		echo "Waiting for SSH to be available"
+		sleep $wait_between_checks
+	done
+	if [ $ssh_available -eq 0 ]; then
+		echo "SSH is still not available after $((max_checks*wait_between_checks/60)) minutes. Aborting image creation"
+		return 1
+	fi	
 	
 	# Create IMAGE_ADMIN_USER as part of sudo group with password IMAGE_ADMIN_PASSWORD
 	if [ ! -z "$IMAGE_ADMIN_USER" ];  then
@@ -1214,6 +1236,7 @@ setup_users_and_authentication_for_image() {
 				--disabled-password --disabled-login $ZOOKEEPER_USER
 	fi
 	
+	return 0
 }
 
 
@@ -1264,12 +1287,13 @@ install_software_on_node() {
 	# Install packages required for iptables firewall configuration.
 	# The debconf commands are because iptables-persistent asks interactively to save
 	# existing rules during installation.
-	echo "Installing ipset and iptables-persistent"
+	# kmod is required because /sbin/modprobe is not part of Linode's Debian distro.
+	echo "Installing kmod, ipset and iptables-persistent"
 	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sh -c \
 		"DEBIAN_FRONTEND=noninteractive; export DEBIAN_FRONTEND;
 		echo iptables-persistent iptables-persistent/autosave_v4 boolean false | debconf-set-selections;
 		echo iptables-persistent iptables-persistent/autosave_v6 boolean false | debconf-set-selections;
-		apt-get -y install ipset iptables-persistent"
+		apt-get -y install kmod ipset iptables-persistent"
 	
 	# Replace the package's init script with the one from 
 	remote_copyfile "iptables-persistent" $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY '~/iptables-persistent'
