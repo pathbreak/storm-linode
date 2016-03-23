@@ -273,7 +273,7 @@ setup_cluster_manager() {
 	
 	# git clone
 	cd /home/clustermgr
-	git clone "https://github.com/pathbreak/storm-linode"
+	git clone -b release-0.1.0 "https://github.com/pathbreak/storm-linode"
 	
 	cd storm-linode
 	chmod +x *.sh *.py
