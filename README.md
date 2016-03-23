@@ -332,3 +332,7 @@ Log in to the Cluster Manager as **clustermgr** using the *clustermgr* private k
         ssh -i ~/.ssh/clustermgr clustermgr@PUBLIC-IP-OF-CLUSTER-MANAGER-LINODE
         cd storm-linode
         ./zookeeper-cluster-linode.sh delete-image zk-image1/zk-image1.conf api_env_linode.conf
+
+# License
+
+MIT
