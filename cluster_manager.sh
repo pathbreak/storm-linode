@@ -67,6 +67,8 @@ SSH_AUTH_SOCK=0
 export SSH_AUTH_SOCK
 
 # $1 -> API env conf file
+# $2 -> (Optional) The SHA1 or short SHA1 hash of the git revision to download. If not specified,
+#		it downloads the latest release tagged version.
 create_cluster_manager_linode() {
 	. $1
 	
@@ -233,7 +235,7 @@ create_cluster_manager_linode() {
 		"root@$public_ip:cluster_manager.sh"
 		
 	echo "Running cluster_manager.sh setup on cluster manager node"
-	ssh_command "$public_ip" "root" "$HOME/.ssh/clustermgrroot" "chmod ugo+x *.sh; ./cluster_manager.sh setup"
+	ssh_command "$public_ip" "root" "$HOME/.ssh/clustermgrroot" "chmod ugo+x *.sh; ./cluster_manager.sh setup $2"
 
 	echo "Copying clustermgr public key to cluster manager node"
 	scp -i "$HOME/.ssh/clustermgrroot" -o IdentitiesOnly=yes -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no "$HOME/.ssh/clustermgr.pub" \
@@ -434,7 +436,7 @@ ssh_command() {
 
 case $1 in
 	create-linode)
-	create_cluster_manager_linode $2
+	create_cluster_manager_linode $2 $3
 	;;
 
 	setup)
