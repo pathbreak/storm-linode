@@ -32,9 +32,10 @@ See [Generating an API key](https://www.linode.com/docs/platform/api/api-key).
 
 1.  Run these commands on your workstation:
 
-        wget https://raw.githubusercontent.com/pathbreak/storm-linode/release-0.1.0/cluster_manager.sh
-        wget https://raw.githubusercontent.com/pathbreak/storm-linode/release-0.1.0/linode_api.py
-        wget https://raw.githubusercontent.com/pathbreak/storm-linode/release-0.1.0/api_env_example.conf
+        git clone "https://github.com/pathbreak/storm-linode"
+        cd storm-linode
+        git checkout $(git tag -l "release*" | head -n1)
+
         chmod +x *.sh *.py
         sudo apt-get install python2.7 curl
         cp api_env_example.conf api_env_linode.conf
