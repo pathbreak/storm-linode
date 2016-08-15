@@ -271,11 +271,15 @@ setup_cluster_manager() {
 	#git config --global user.email "you@example.com"
 	#git config --global user.name "Your Name"
 	
-	# git clone
+	# Get the latest release version of the scripts.
 	cd /home/clustermgr
-	git clone -b release-0.1.0 "https://github.com/pathbreak/storm-linode"
-	
+	git clone "https://github.com/pathbreak/storm-linode"
 	cd storm-linode
+	git fetch --tags
+	latest_release_tag=$(git tag -l "release*" | head -n1)
+	echo "Changing to latest release tag : $latestTag"
+ 	git checkout $latestTag
+
 	chmod +x *.sh *.py
 	
 	wget "$STORM_URL"
