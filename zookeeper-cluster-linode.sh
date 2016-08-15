@@ -70,6 +70,10 @@ create_new_image_conf() {
 	cp template-zk-supervisord.conf "$1/zk-supervisord.conf"
 	
 	chmod go-rwx $1/*
+	
+	echo "Created image directory $1. "
+	echo "Edit $1/$1.conf to enter mandatory properties, and then create the image with "
+	echo "    zookeeper-cluster-linode.sh create-image $1/$1.conf <API-ENV-CONF-FILE>"
 }
 
 
@@ -337,6 +341,11 @@ create_new_cluster_conf() {
 	
 	cp zk-cluster-example.conf "$1/$1.conf"
 	chmod go-rwx "$1/$1.conf"
+	
+	echo "Created cluster directory $1. "
+	echo "Edit $1/$1.conf to enter mandatory properties, and then create the cluster with "
+	echo "    zookeeper-cluster-linode.sh create $1/$1.conf <API-ENV-CONF-FILE>"
+	
 }
 
 
