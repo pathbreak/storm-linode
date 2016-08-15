@@ -66,6 +66,7 @@ ZOOKEEPER_URL='http://www.us.apache.org/dist/zookeeper/zookeeper-3.4.6/zookeeper
 SSH_AUTH_SOCK=0
 export SSH_AUTH_SOCK
 
+# $1 -> API env conf file
 create_cluster_manager_linode() {
 	. $1
 	
@@ -253,6 +254,8 @@ create_cluster_manager_linode() {
 	echo "Cluster Manager is ready. Log in using 'SSH_AUTH_SOCK=0 ssh -i ~/.ssh/clustermgr clustermgr@$public_ip'"
 }
 
+# $1 -> (Optional) The SHA1 or short SHA1 hash of the git revision to download. If not specified,
+#		it downloads the latest release tagged version.
 setup_cluster_manager() {
 	apt-get -y update
 	#apt-get -y upgrade
@@ -275,10 +278,15 @@ setup_cluster_manager() {
 	cd /home/clustermgr
 	git clone "https://github.com/pathbreak/storm-linode"
 	cd storm-linode
-	git fetch --tags
-	latest_release_tag=$(git tag -l "release*" | head -n1)
-	echo "Changing to latest release tag : $latestTag"
- 	git checkout $latestTag
+	if [ "x$1" == "x" ]; then
+		git fetch --tags
+		latest_release_tag=$(git tag -l "release*" | head -n1)
+		echo "Activating latest release version of the software : $latestTag"
+ 		git checkout $latestTag
+ 	else
+		echo "Activating specified revision of the software : $1"
+ 		git checkout $1
+ 	fi
 
 	chmod +x *.sh *.py
 	
@@ -430,6 +438,6 @@ case $1 in
 	;;
 
 	setup)
-	setup_cluster_manager
+	setup_cluster_manager $2
 	;;
 esac
