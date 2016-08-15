@@ -437,9 +437,11 @@ def create_swap_disk(linode_id):
 	elif 4096 <= ram_mb <= 8192:
 		swap_disk_size_mb = ram_mb
 		
-	elif ram_mb >= 16384:
+	elif 8192 < ram_mb <= 32768:
 		swap_disk_size_mb = ram_mb / 2;
-		
+	
+	elif ram_mb > 32768:
+		swap_disk_size_mb = 32768;
 	
 	params={
 		'LinodeID' : linode_id,
