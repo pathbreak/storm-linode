@@ -653,41 +653,41 @@ create_new_nodes() {
 		
 		local plan_id
 		case $plan in
-			"1GB")
+			"2GB")
 				plan_id=1
 				;;
 				
-			"2GB")
+			"4GB")
 				plan_id=2
 				;;
 				
-			"4GB")
+			"8GB")
 				plan_id=4
 				;;
 				
-			"8GB")
+			"12GB")
 				plan_id=6
 				;;
 				
-			"16GB")
+			"24GB")
 				plan_id=7
 				;;
 				
-			"32GB")
+			"48GB")
 				plan_id=8
 				;;
 				
-			"48GB")
+			"64GB")
 				plan_id=9
 				;;
 				
-			"64GB")
+			"80GB")
 				plan_id=10
 				;;				
 
-			"96GB")
+			"120GB")
 				plan_id=12
-				;;	
+				;;
 				
 			*)
 				echo "Invalid plan $plan. Aborting..."
@@ -1374,7 +1374,7 @@ install_zookeeper_on_node() {
 	# Create java.env with JVM heap settings in installation directory.
 	# If the values are percentages, then they are dynamically calculated later on at cluster
 	# creation time based on the individual node's plan. Since java.env should not be invalid and Xm values
-	# can't be percentages, set them to a default value of 768M (which is 75% of the lowest linode 1GB RAM plan).
+	# can't be percentages, set them to a default value of 1536M (which is 75% of the lowest linode 2GB RAM plan).
 	# The single quotes around $JVMFLAGS is to ensure that JVMFLAGS value remains enclosed in single quotes "-Xms -Xmx"
 	# Otherwise, it gives an error "-Xmx is unknown command" due to the space char in the middle.
 	local min_heap="$ZOOKEEPER_MIN_HEAP_SIZE"
@@ -1384,10 +1384,10 @@ install_zookeeper_on_node() {
 	local max_heap_value="$(echo $max_heap | tr -d '%kKmMgG')"
 	local max_heap_units="$(echo $max_heap | tr -d '[:digit:]')"
 	if [ "$min_heap_units" == "%" ]; then 
-		min_heap="768M"
+		min_heap="1536M"
 	fi
 	if [ "$max_heap_units" == "%" ]; then 
-		max_heap="768M"
+		max_heap="1536M"
 	fi
 	local java_env_contents="export JVMFLAGS=\'-Xms$min_heap -Xmx$max_heap\'"
 	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY "sh -c \"echo $java_env_contents > $install_dir/conf/java.env\""

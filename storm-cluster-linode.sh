@@ -646,7 +646,7 @@ create_new_nodes() {
 	get_plan_id $NIMBUS_NODE
 	nimbus_plan_id=$?
 	if [ $nimbus_plan_id -eq -1 ]; then
-		echo "Invalid plan $NIMBUS_NODE for Nimbus node. It should be one of 1GB|2GB|4GB....See https://www.linode.com/pricing for plan names"
+		echo "Invalid plan $NIMBUS_NODE for Nimbus node. It should be one of 2GB|4GB|8GB|...|120GB.See https://www.linode.com/pricing for all plan names"
 		return 1
 	fi
 	
@@ -675,7 +675,7 @@ create_new_nodes() {
 	get_plan_id $CLIENT_NODE
 	client_plan_id=$?
 	if [ $client_plan_id -eq -1 ]; then
-		echo "Invalid plan $CLIENT_NODE for client node. It should be one of 1GB|2GB|4GB....See https://www.linode.com/pricing for plan names"
+		echo "Invalid plan $CLIENT_NODE for client node. It should be one of 2GB|4GB|8GB|...|120GB.See https://www.linode.com/pricing for all plan names"
 		return 1
 	fi
 	
@@ -693,7 +693,7 @@ create_new_nodes() {
 
 
 # $1 : Cluster name as in cluster conf file
-# $2 : Plan for supervisor nodes (ex: "1GB:1 2GB:1 4GB:1")
+# $2 : Plan for supervisor nodes (ex: "2GB:1 4GB:1 8GB:1")
 # $3 : Datacenter ID
 # $4 : Image ID
 # $5 : Kernel ID
@@ -718,7 +718,7 @@ create_supervisor_nodes() {
 		get_plan_id $plan
 		plan_id=$?
 		if [ $plan_id -eq -1 ]; then
-			echo "Invalid plan $plan for supervisor nodes. It should be one of 1GB|2GB|4GB....See https://www.linode.com/pricing for plan names"
+			echo "Invalid plan $plan for supervisor nodes. It should be one of 2GB|4GB|8GB|...|120GB.See https://www.linode.com/pricing for all plan names"
 			return 1
 		fi
 
@@ -745,43 +745,43 @@ create_supervisor_nodes() {
 
 
 
-# $1 : The plan name ("1GB | 2GB | 4GB ....")
+# $1 : The plan name ("2GB | 4GB | 8GB ....")
 get_plan_id() {
 	local plan_id
 	case $1 in
-		"1GB")
+		"2GB")
 			plan_id=1
 			;;
 			
-		"2GB")
+		"4GB")
 			plan_id=2
 			;;
 			
-		"4GB")
+		"8GB")
 			plan_id=4
 			;;
 			
-		"8GB")
+		"12GB")
 			plan_id=6
 			;;
 			
-		"16GB")
+		"24GB")
 			plan_id=7
 			;;
 			
-		"32GB")
+		"48GB")
 			plan_id=8
 			;;
 			
-		"48GB")
+		"64GB")
 			plan_id=9
 			;;
 			
-		"64GB")
+		"80GB")
 			plan_id=10
 			;;				
 
-		"96GB")
+		"120GB")
 			plan_id=12
 			;;
 		
@@ -1954,7 +1954,7 @@ kill_all_topologies() {
 # $1 : The cluster conf file
 # $2 : The API environment file
 # $3 : Plans and counts for new supervisor nodes 
-#		(ex: "1GB:1 2GB:1 4GB:1" adds 3 new supervisor nodes, a 1 GB, a 2 GB and a 4 GB)
+#		(ex: "2GB:1 4GB:1 8GB:1" adds 3 new supervisor nodes, a 2 GB, a 4 GB and a 8 GB)
 add_nodes() {
 	if [ ! -f $1 ]; then
 		printf "Configuration file $1 not found.\nUsage: storm-cluster-linode.sh add-nodes CLUSTER-CONF-FILE API-ENV-FILE NEW-SUPERVISOR-NODES\n"
