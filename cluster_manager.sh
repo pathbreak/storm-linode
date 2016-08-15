@@ -251,7 +251,8 @@ create_cluster_manager_linode() {
 	
 	# Cleanup:
 	# We don't want to keep the cluster_manager.sh around, since it contains the root user password for the node.
-	rm ./cluster_manager.sh ./linode_api.py ./api_env_*
+	cd ..
+	rm -rf storm-linode
 	
 	echo "Cluster Manager is ready. Log in using 'SSH_AUTH_SOCK=0 ssh -i ~/.ssh/clustermgr clustermgr@$public_ip'"
 }
