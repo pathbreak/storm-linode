@@ -163,7 +163,7 @@ Only whitelisted IP addresses can monitor a Storm Cluster using its Storm UI web
         ssh -i ~/.ssh/clustermgr clustermgr@PUBLIC-IP-OF-CLUSTER-MANAGER-LINODE
         cd storm-linode
 
-2.  Open *<your-cluster>/<your-cluster>-client-user-whitelist.ipsets* in an editor.
+2.  Open *[your-cluster]/[your-cluster]-client-user-whitelist.ipsets* in an editor.
 
     It's an [ipsets](http://ipset.netfilter.org/ipset.man.html) list of whitelisted IP addresses.
     
