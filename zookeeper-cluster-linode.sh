@@ -60,47 +60,49 @@ init_conf() {
 
 
 
-# $1 : Image directory name
+# $1 : Image name, or a target directory as absolute or relative path
 create_new_image_conf() {
+	# "dirname" lets us differentiate between a path with slashes, or just a simple
+	# name. If there are no slashes, dirname simply returns ".".
+	# "basename" extracts the last non slash component.
+	# "readlink -m" converts relative path to absolute path, regardless of any missing
+	#	path components.
+	# "readlink -e" converts relative path to absolute path, but if any missing
+	#	path components, it doesn't return the full path.
+	
+	if check_image_dir_exists "$1"; then
+		echo "Validation error: Image '$1' already exists. Provide a unique name or directory."
+		return 1
+	fi
+	
+	echo "IMAGE_NAME=$IMAGE_NAME"
+	if ! validate_image_name "$IMAGE_NAME"; then
+		return 1
+	fi
+
 	mkdir -p "$1"
 	
-	cp zk-image-example.conf "$1/$1.conf"
+	cp zk-image-example.conf "$1/$IMAGE_NAME.conf"
 	cp template_zoo.cfg "$1/zoo.cfg"
 	cp template_zk_log4j.properties "$1/log4j.properties"
 	cp template-zk-supervisord.conf "$1/zk-supervisord.conf"
 	
 	chmod go-rwx $1/*
 	
-	echo "Created image directory $1. "
-	echo "Edit $1/$1.conf to enter mandatory properties, and then create the image with "
-	echo "    zookeeper-cluster-linode.sh create-image $1/$1.conf <API-ENV-CONF-FILE>"
+	echo "Created image directory '$1'"
+	echo "Edit $1/$IMAGE_NAME.conf to enter mandatory properties, and then create the image with "
+	echo "    zookeeper-cluster-linode.sh create-image $1 <API-ENV-CONF-FILE>"
 }
 
 
 
 
-# 	$1 : Path of image configuration file.
+# 	$1 : Name of image directory or Path of image configuration file.
 #	$2 : Name of API environment configuration file containing API endpoint and key.
 create_zk_image() {
-	if [ ! -f $1 ]; then
-		printf "Configuration file $1 not found.\nUsage: zookeeper-cluster-linode.sh create-image CONF-FILE API-ENV-FILE\n"
-		return 1
-	fi
-
-	# Absolute paths of this script's directory, and the image conf file's directory.
-	SCRIPT_DIR="$(pwd)"
-	IMAGE_CONF_FILE="$(readlink -m $1)"
-	IMAGE_CONF_DIR="$(dirname $IMAGE_CONF_FILE)"
 	
-	echo "SCRIPT_DIR=$SCRIPT_DIR"
-	echo "IMAGE_CONF_DIR=$IMAGE_CONF_DIR"
-	echo "IMAGE_CONF_FILE=$IMAGE_CONF_FILE"
 	
-	# Include the specified configuration file with template creation environment variables, and the
-	# API endpoint configuration file.
-	. $1
-	validate_image_configuration
-	if [ $? -eq 1 ]; then
+	if ! load_image_conf "$1"; then
 		return 1
 	fi
 	
@@ -285,33 +287,21 @@ create_zk_image() {
 
 
 
-# 	$1 : Name of configuration file containing base node spec, template node spec, install flags and any other
-#		 common configuration options.
+# 	$1 : Name of image directory or Path of image configuration file.
 #	$2 : Name of API environment configuration file containing API endpoint and key.
 delete_zk_image() {
-	if [ ! -f $1 ]; then
-		printf "Configuration file $1 not found.\nUsage: zookeeper-cluster-linode.sh delete-image CONF-FILE API-ENV-FILE\n"
+	
+	if ! load_image_conf "$1"; then
 		return 1
 	fi
-
-	# Absolute paths of this script's directory, and the image conf file's directory.
-	SCRIPT_DIR="$(pwd)"
-	IMAGE_CONF_FILE="$(readlink -m $1)"
-	IMAGE_CONF_DIR="$(dirname $IMAGE_CONF_FILE)"
-	
-	echo "SCRIPT_DIR=$SCRIPT_DIR"
-	echo "IMAGE_CONF_DIR=$IMAGE_CONF_DIR"
-	echo "IMAGE_CONF_FILE=$IMAGE_CONF_FILE"
-	
 
 	# Include API endpoint configuration file.
-	. $2
-	validate_api_env_configuration
-	if [ $? -eq 1 ]; then
+	. "$2"
+	if ! validate_api_env_configuration; then
 		return 1
 	fi
 	
-	local stfile=$(image_status_file)
+	local stfile="$(image_status_file)"
 	if [ ! -f "$stfile" ]; then
 		# Status file does not exist, which means image is probably not created.
 		echo "Image does not exist. Nothing further to do..."
@@ -1358,8 +1348,8 @@ install_zookeeper_on_node() {
 	
 	echo "Installing $INSTALL_ZOOKEEPER_DISTRIBUTION on $1..."
 
-	local remote_path=$(basename $INSTALL_ZOOKEEPER_DISTRIBUTION)
-	remote_copyfile $INSTALL_ZOOKEEPER_DISTRIBUTION $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY $remote_path
+	local remote_path=$(basename "$INSTALL_ZOOKEEPER_DISTRIBUTION")
+	remote_copyfile "$INSTALL_ZOOKEEPER_DISTRIBUTION" $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY $remote_path
 
 	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY tar -C $ZOOKEEPER_INSTALL_DIRECTORY -xzf $remote_path
 
@@ -2123,6 +2113,24 @@ copy_files() {
 
 
 # 	$1 : The API environment configuration file
+list_plans() {
+	
+	# Include the specified API environment variables.
+	. $1
+	validate_api_env_configuration
+	if [ $? -eq 1 ]; then
+		return 1
+	fi
+	
+	./linode_api.py 'plans' 'table'
+}
+
+
+
+
+
+
+# 	$1 : The API environment configuration file
 list_datacenters() {
 	
 	# Include the specified API environment variables.
@@ -2132,7 +2140,7 @@ list_datacenters() {
 		return 1
 	fi
 	
-	./linode_api.py "datacenters" 'table'
+	./linode_api.py 'datacenters' 'table'
 }
 
 
@@ -2175,6 +2183,116 @@ list_kernels() {
 	./linode_api.py "kernels" "$filter" 'table'
 }
 
+
+# $1 -> Image name
+validate_image_name() {
+	# - Shouldn't be empty.
+	# - Only alphabets, digits, hyphens, underscores
+	# - No length restriction, since image name isn't used as ipset name.
+	# - Should be unique. 
+
+	local invalid=0
+	if [ "$1" == "" ]; then
+		echo "Validation error: Image name should not be empty"
+		invalid=1
+		
+	else
+	
+		# Should contain only alphabets, digits, hyphens and underscores.
+		local strip_allowed=$(printf "$1"|tr -d "[=-=][_][:digit:][:alpha:]")
+		local len_notallowedchars=$(printf "$strip_allowed"|wc -m)
+		if [ $len_notallowedchars -gt 0 ]; then
+			echo "Validation error: Image name can have only alphabets, digits, hyphens and underscores. No whitespaces or special characters."
+			invalid=1
+		fi
+	fi
+
+	return $invalid
+}
+
+# $1 -> Image name, or absolute or relative path of image directory
+check_image_dir_exists() {
+	
+	# "dirname" lets us differentiate between a path with slashes, or just a simple
+	# name. If there are no slashes, dirname simply returns ".".
+	# "basename" extracts the last non slash component.
+	# "readlink -m" converts relative path to absolute path, regardless of any missing
+	#	path components.
+	# "readlink -e" converts relative path to absolute path, but if any missing
+	#	path components, it doesn't return the full path.
+	local image_full_path=$(readlink -m "$1")
+	IMAGE_NAME=$(basename "$image_full_path")
+	local image_parent=$(dirname "$image_full_path")
+	
+	if [ -d "$image_full_path" ]; then
+		return 0
+	fi
+	
+	return 1
+}
+
+
+# $1 -> Image name, or absolute or relative path of image directory, or
+#		absolute or relative path of image conf file in image directory.
+load_image_conf() {
+	
+	# readlink -m converts a name to an absolute path, even if some path components 
+	# are non existent. 
+	# A simple name like "zkcluster1" is treated like a relative path and becomes <ABSOLUTE_CURRENT_DIR>/zkcluster1
+	# Similarly other relative paths with "./" or "../"
+	local param_full_path=$(readlink -m "$1")
+	
+	if [ -d "$param_full_path" ]; then
+		# Check that there is a $image_name.conf in the directory and it is
+		# a proper image conf.
+		IMAGE_NAME=$(basename "$param_full_path")
+		IMAGE_CONF_FILE="$param_full_path/$IMAGE_NAME.conf"
+		IMAGE_CONF_DIR="$(dirname $IMAGE_CONF_FILE)"
+		
+		if [ ! -f "$IMAGE_CONF_FILE" ]; then
+			echo "Error: '$1' does not seem to be a valid image name or image directory. Could not find image conf file '$IMAGE_CONF_FILE'"
+			return 1
+		fi
+		
+	elif [ -f "$param_full_path" ]; then
+		# The given file may be any file at all, but what we want is a conf file with the correct image name.
+		IMAGE_NAME=$(basename $(dirname "$param_full_path"))
+		IMAGE_CONF_DIR=$(dirname "$param_full_path")
+		IMAGE_CONF_FILE="$IMAGE_CONF_DIR/$IMAGE_NAME.conf"
+		
+		local param_basename=$(basename "$param_full_path")
+		if [ "$param_basename" != "$IMAGE_NAME.conf" ]; then
+			echo "Error: '$1' does not seem to be a valid image conf filename. Expected image conf filename '$IMAGE_CONF_FILE'"
+			return 1
+		fi 
+		
+		if [ ! -f "$IMAGE_CONF_FILE" ]; then
+			echo "Error: Image conf file '$IMAGE_CONF_FILE' does not exist."
+			return 1
+		fi
+		
+	else
+		echo "Error: '$param_full_path' does not exist."
+		return 1
+	fi
+		
+	# Absolute paths of this script's directory, and the image conf file's directory.
+	SCRIPT_DIR="$(pwd)"
+	
+	echo "SCRIPT_DIR=$SCRIPT_DIR"
+	echo "IMAGE_NAME=$IMAGE_NAME"
+	echo "IMAGE_CONF_DIR=$IMAGE_CONF_DIR"
+	echo "IMAGE_CONF_FILE=$IMAGE_CONF_FILE"
+
+	# Load the conf file as an environment variables file.
+	source "$IMAGE_CONF_FILE"
+	
+	# Check if it's a proper conf file
+	validate_image_configuration
+	if [ $? -eq 1 ]; then
+		return 1
+	fi
+}
 
 
 # Caller is expected to have included the image configuration file in environment
@@ -2259,6 +2377,14 @@ validate_image_configuration() {
 
 	if [ -z "$INSTALL_ZOOKEEPER_DISTRIBUTION" ]; then
 		echo "Validation error: INSTALL_ZOOKEEPER_DISTRIBUTION should be a Zookeeper distribution archive."
+		invalid=1
+		
+	elif [ ! -f "$INSTALL_ZOOKEEPER_DISTRIBUTION" ]; then
+		echo "Validation error: Zookeeper distribution archive path INSTALL_ZOOKEEPER_DISTRIBUTION does not exist."
+		invalid=1
+		
+	elif ! tar -tzf "$INSTALL_ZOOKEEPER_DISTRIBUTION" >/dev/null ; then
+		echo "Validation error: INSTALL_ZOOKEEPER_DISTRIBUTION does not seem to be a valid archive file."
 		invalid=1
 	fi
 
@@ -2530,8 +2656,7 @@ create_image_status_file() {
 
 
 image_status_file() {
-	local image_name=$(basename "$IMAGE_CONF_FILE"|sed -r 's/.conf//')
-	echo "$IMAGE_CONF_DIR/$image_name.info"
+	echo "$IMAGE_CONF_DIR/$IMAGE_NAME.info"
 }
 
 
@@ -2575,79 +2700,83 @@ ssh_command() {
 
 case $1 in
 	new-image-conf)
-	create_new_image_conf $2
+	create_new_image_conf "$2"
 	;;
 
 	create-image)
-	create_zk_image $2 $3
+	create_zk_image "$2" "$3"
 	;;
 
 	delete-image)
-	delete_zk_image $2 $3
+	delete_zk_image "$2" "$3"
 	;;
 
 	new-cluster-conf)
-	create_new_cluster_conf $2
+	create_new_cluster_conf "$2"
 	;;
 
 	create)
-	create_cluster $2 $3
+	create_cluster "$2" "$3"
 	;;
 
 	start)
-	start_cluster $2 $3
+	start_cluster "$2" "$3"
 	;;
 
 	shutdown|stop)
-	stop_cluster $2 $3
+	stop_cluster "$2" "$3"
 	;;
 
 	destroy)
-	destroy_cluster $2 $3
+	destroy_cluster "$2" "$3"
 	;;
 
 	update-zoo-cfg)
-	update_zk_configuration $2
+	update_zk_configuration "$2"
 	;;
 	
 	update-firewall)
-	update_firewall $2
+	update_firewall "$2"
 	;;
 	
 	create-cluster-whitelist)
-	create_cluster_whitelist $2
+	create_cluster_whitelist "$2"
 	;;
 	
 	add-whitelist) 
-	add_to_whitelist $2 $3
+	add_to_whitelist "$2" "$3"
 	;;
 	
 	remove-whitelist) 
-	remove_from_whitelist $2 $3
+	remove_from_whitelist "$2" "$3"
 	;;
 	
 	describe)
-	describe_cluster $2
+	describe_cluster "$2"
 	;;
 	
 	run)
-	run_cmd $2 "${@:3}"
+	run_cmd "$2" "${@:3}"
 	;;
 	
 	cp)
-	copy_files $2 "$3" "${@:4}"
+	copy_files "$2" "$3" "${@:4}"
 	;;
 	
+	plans)
+	list_plans "$2"
+	;;
+
 	datacenters)
-	list_datacenters $2
+	list_datacenters "$2"
 	;;
 
 	distributions)
-	list_distributions $2 $3
+	list_distributions "$2" "$3"
 	;;
 	
 	kernels)
-	list_kernels $2 $3
+	list_kernels "$2" "$3"
 	;;
 	
 	*)
