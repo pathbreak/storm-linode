@@ -5,50 +5,90 @@
 SSH_AUTH_SOCK=0
 export SSH_AUTH_SOCK
 
-# $1 : Name of cluster configuration file
-init_conf() {
+# $1 -> Cluster name, or absolute or relative path of cluster directory, or
+#		absolute or relative path of cluster conf file in cluster directory.
+load_cluster_conf() {
 	
+	if [ -z "$1" ]; then
+		echo "Error: Provide a cluster name or cluster directory path or cluster configuration file path"
+		return 1
+	fi
+	
+	local param_full_path=$(readlink -m "$1")
+	
+	if [ -d "$param_full_path" ]; then
+		# Check that there is a $CLUSTER_NAME.conf in the directory and it is
+		# a proper cluster conf.
+		CLUSTER_NAME=$(basename "$param_full_path")
+		CLUSTER_CONF_FILE="$param_full_path/$CLUSTER_NAME.conf"
+		CLUSTER_CONF_DIR="$(dirname $CLUSTER_CONF_FILE)"
+		
+		if [ ! -f "$CLUSTER_CONF_FILE" ]; then
+			echo "Error: '$1' does not seem to be a valid cluster name or cluster directory. Could not find cluster configuration file '$CLUSTER_CONF_FILE'"
+			return 1
+		fi
+		
+	elif [ -f "$param_full_path" ]; then
+		# The given file may be any file at all, but what we want is a conf file with the correct cluster name.
+		CLUSTER_NAME=$(basename $(dirname "$param_full_path"))
+		CLUSTER_CONF_DIR=$(dirname "$param_full_path")
+		CLUSTER_CONF_FILE="$CLUSTER_CONF_DIR/$CLUSTER_NAME.conf"
+		
+		local param_basename=$(basename "$param_full_path")
+		if [ "$param_basename" != "$CLUSTER_NAME.conf" ]; then
+			echo "Error: '$1' does not seem to be a valid cluster configuration filename. Expected cluster configuration filename '$CLUSTER_CONF_FILE'"
+			return 1
+		fi 
+		
+		if [ ! -f "$CLUSTER_CONF_FILE" ]; then
+			echo "Error: Cluster configuration file '$CLUSTER_CONF_FILE' does not exist."
+			return 1
+		fi
+		
+	else
+		echo "Error: '$param_full_path' does not exist."
+		return 1
+	fi
+
+
 	# Absolute paths of this script's directory, and the image conf file's directory.
 	SCRIPT_DIR="$(pwd)"
-	CLUSTER_CONF_DIR="$(readlink -m $(dirname $1))"
-	CLUSTER_CONF_FILE="$(readlink -m $1)"
 	
 	echo "SCRIPT_DIR=$SCRIPT_DIR"
+	echo "CLUSTER_NAME=$CLUSTER_NAME"
 	echo "CLUSTER_CONF_DIR=$CLUSTER_CONF_DIR"
 	echo "CLUSTER_CONF_FILE=$CLUSTER_CONF_FILE"
 	
 	# Include the cluster conf file
-	. $CLUSTER_CONF_FILE
+	source $CLUSTER_CONF_FILE
 
 	# ZK_IMAGE_CONF may be a path that is relative to the cluster conf file, such
-	# as "../zk-image1/zk-image1.conf" or "./zk-image1/zk-image1.conf" or "zk-image1/zk-image1.conf"
+	# as "../zk-image1/zk-image1.conf" or "../zk-image1" or "/home/clustermgr/storm-linode/zk-image1"
 	# We need to resolve it to its absolute path by prefixing it with  $CLUSTER_CONF_DIR
-	# to get "$CLUSTER_CONF_DIR/../zk-image1/zk-image1.conf
+	# to get "$CLUSTER_CONF_DIR/../zk-image1/zk-image1.conf"
+	if [ -z "$ZK_IMAGE_CONF" ]; then
+		echo "Error: ZK_IMAGE_CONF should be a Zookeeper image directory or image configuration file"
+		return 1
+	fi
+	
+	local zk_image_conf
 	if [ "${ZK_IMAGE_CONF:0:1}" == "/" ]; then
 		# It's an absolute path. Retain as it is.
-		IMAGE_CONF_FILE="$ZK_IMAGE_CONF"
+		zk_image_conf="$ZK_IMAGE_CONF"
 	else
 		# It's a relative path. Convert to absolute by prefixing with cluster conf dir.
-		IMAGE_CONF_FILE="$(readlink -m $CLUSTER_CONF_DIR/$ZK_IMAGE_CONF)"
+		zk_image_conf="$(readlink -m $CLUSTER_CONF_DIR/$ZK_IMAGE_CONF)"
 	fi
-	IMAGE_CONF_DIR="$(dirname $IMAGE_CONF_FILE)"
-	echo "IMAGE_CONF_DIR=$IMAGE_CONF_DIR"
-	echo "IMAGE_CONF_FILE=$IMAGE_CONF_FILE"
-
-	validate_cluster_configuration
-	if [ $? -eq 1 ]; then
+	
+	if ! load_image_conf "$zk_image_conf"; then
+		echo "Error: Change value of ZK_IMAGE_CONF to a valid Zookeeper image name or image directory or image configuration file path."
 		return 1
 	fi
 	
-	# Include the image conf file
-	. $IMAGE_CONF_FILE
-	
-	validate_image_configuration
-	if [ $? -eq 1 ]; then
+	if ! validate_cluster_configuration; then
 		return 1
 	fi
 	
-
 	NODE_USERNAME=root
 	if [ -z "$NODE_ROOT_SSH_PRIVATE_KEY" ]; then
 		NODE_ROOT_SSH_PRIVATE_KEY=$IMAGE_ROOT_SSH_PRIVATE_KEY
@@ -62,13 +102,6 @@ init_conf() {
 
 # $1 : Image name, or a target directory as absolute or relative path
 create_new_image_conf() {
-	# "dirname" lets us differentiate between a path with slashes, or just a simple
-	# name. If there are no slashes, dirname simply returns ".".
-	# "basename" extracts the last non slash component.
-	# "readlink -m" converts relative path to absolute path, regardless of any missing
-	#	path components.
-	# "readlink -e" converts relative path to absolute path, but if any missing
-	#	path components, it doesn't return the full path.
 	
 	if check_image_dir_exists "$1"; then
 		echo "Validation error: Image '$1' already exists. Provide a unique name or directory."
@@ -106,9 +139,7 @@ create_zk_image() {
 		return 1
 	fi
 	
-	. $2
-	validate_api_env_configuration
-	if [ $? -eq 1 ]; then
+	if ! load_api_env_configuration "$2"; then
 		return 1
 	fi
 	
@@ -296,8 +327,7 @@ delete_zk_image() {
 	fi
 
 	# Include API endpoint configuration file.
-	. "$2"
-	if ! validate_api_env_configuration; then
+	if ! load_api_env_configuration "$2"; then
 		return 1
 	fi
 	
@@ -325,16 +355,27 @@ delete_zk_image() {
 
 
 
-# $1 : Cluster directory name
+# $1 : Cluster name, or a target directory as absolute or relative path
 create_new_cluster_conf() {
+	
+	if check_cluster_dir_exists "$1"; then
+		echo "Validation error: Cluster '$1' already exists. Provide a unique name or directory."
+		return 1
+	fi
+	
+	echo "CLUSTER_NAME=$CLUSTER_NAME"
+	if ! validate_cluster_name "$CLUSTER_NAME"; then
+		return 1
+	fi
+	
 	mkdir -p "$1"
 	
-	cp zk-cluster-example.conf "$1/$1.conf"
-	chmod go-rwx "$1/$1.conf"
+	cp zk-cluster-example.conf "$1/$CLUSTER_NAME.conf"
+	chmod go-rwx "$1/$CLUSTER_NAME.conf"
 	
 	echo "Created cluster directory $1. "
-	echo "Edit $1/$1.conf to enter mandatory properties, and then create the cluster with "
-	echo "    zookeeper-cluster-linode.sh create $1/$1.conf <API-ENV-CONF-FILE>"
+	echo "Edit $1/$CLUSTER_NAME.conf to enter mandatory properties, and then create the cluster with "
+	echo "    zookeeper-cluster-linode.sh create $1 <API-ENV-CONF-FILE>"
 	
 }
 
@@ -344,26 +385,18 @@ create_new_cluster_conf() {
 
 
 
-# 	$1 : Name of configuration file
+# 	$1 : Name of cluster directory or Path of cluster configuration file.
 #	$2 : The API environment configuration file
 #	$3 : (Optional) If this is "--dontshutdown", then nodes are not stopped after creation. This option should be passed
 #			only by start cluster. By default, nodes are shutdown after creation
 create_cluster() {
-	if [ ! -f $1 ]; then
-		printf "Configuration file $1 not found.\nUsage: zookeeper-cluster.sh create CLUSTER-CONF-FILE\n"
-		return 1
-	fi
-
 
 	# Include the specified configuration file with cluster specific environment variables.
-	init_conf $1
-	if [ $? -eq 1 ]; then
+	if ! load_cluster_conf "$1"; then
 		return 1
 	fi
-
-	. $2
-	validate_api_env_configuration
-	if [ $? -eq 1 ]; then
+	
+	if ! load_api_env_configuration "$2"; then
 		return 1
 	fi
 
@@ -420,24 +453,18 @@ create_cluster() {
 
 
 
-# 	$1 : Name of configuration file
+# 	$1 : Name of cluster directory or Path of cluster configuration file.
 #	$2 : The API environment configuration file
 start_cluster() {
-	if [ ! -f $1 ]; then
-		printf "Configuration file $1 not found.\nUsage: zookeeper-cluster.sh start CLUSTER-CONF-FILE\n"
-		return 1
-	fi
 
 	echo "Starting Zookeeper cluster $1..."
 
-	init_conf $1
-	if [ $? -eq 1 ]; then
+	if ! load_cluster_conf "$1"; then
 		return 1
 	fi
+	
 
-	. $2
-	validate_api_env_configuration
-	if [ $? -eq 1 ]; then
+	if ! load_api_env_configuration "$2"; then
 		return 1
 	fi
 	
@@ -454,7 +481,7 @@ start_cluster() {
 	if [ ! -f "$stfile" ]; then
 		# Status file does not exist, which means cluster is not created.
 		# So everything is done by create_cluster, and this function should just start zookeeper service on all nodes.
-		create_cluster $1 $2 "--dontshutdown"
+		create_cluster "$1" "$2" "--dontshutdown"
 
 	else
 		local status=$(get_cluster_status)
@@ -523,24 +550,17 @@ start_cluster() {
 
 
 
-# 	$1 : Name of configuration file
+# 	$1 : Name of cluster directory or Path of cluster configuration file.
 #	$2 : The API environment configuration file
 stop_cluster() {
-	if [ ! -f $1 ]; then
-		printf "Configuration file $1 not found.\nUsage: zookeeper-cluster-linode.sh shutdown CLUSTER-CONF-FILE\n"
-		return 1
-	fi
 
 	echo "Stopping cluster $1..."
 
-	init_conf $1
-	if [ $? -eq 1 ]; then
+	if ! load_cluster_conf "$1"; then
 		return 1
 	fi
 
-	. $2
-	validate_api_env_configuration
-	if [ $? -eq 1 ]; then
+	if ! load_api_env_configuration "$2"; then
 		return 1
 	fi
 
@@ -831,22 +851,15 @@ add_nodes() {
 
 
 
-# 	$1 : Name of configuration file
+# 	$1 : Name of cluster directory or Path of cluster configuration file.
 #	$2 : The API environment configuration file
 destroy_cluster() {
-	if [ ! -f $1 ]; then
-		printf "Configuration file $1 not found.\nUsage: zookeeper-cluster.sh destroy CLUSTER-CONF-FILE\n"
+
+	if ! load_cluster_conf "$1"; then
 		return 1
 	fi
 
-	init_conf $1
-	if [ $? -eq 1 ]; then
-		return 1
-	fi
-
-	. $2
-	validate_api_env_configuration
-	if [ $? -eq 1 ]; then
+	if ! load_api_env_configuration "$2"; then
 		return 1
 	fi
 
@@ -974,7 +987,7 @@ stop_nodes() {
 
 
 
-#	$1 : Name of the cluster as specified in it's cluster conf file.
+#	$1 : Name of the cluster 
 change_hostkeys() {
 	local stfile="$(status_file)"
 
@@ -1004,7 +1017,7 @@ change_hostkeys() {
 
 
 
-#	$1 : Name of the cluster as specified in it's cluster conf file.
+#	$1 : Name of the cluster 
 set_hostnames() {
 	local stfile="$(status_file)"
 	# Note: output of get_section is multiline, so always use it inside double quotes such as "$entries"
@@ -1077,7 +1090,7 @@ set_hostname() {
 
 
 
-#	$1 : Name of the cluster as specified in it's cluster conf file.
+#	$1 : Name of the cluster 
 distribute_hostsfile() {
 	local stfile="$(status_file)"
 	# Note: output of get_section is multiline, so always use it inside double quotes such as "$entries"
@@ -1428,7 +1441,7 @@ install_zookeeper_on_node() {
 }
 
 
-#	$1 : Name of the cluster as specified in it's cluster conf file.
+#	$1 : Name of the cluster 
 assign_zk_node_ids() {
 	echo "Assigning unique 'myid' to all nodes in zookeeper cluster..."
 
@@ -1465,7 +1478,7 @@ assign_zk_node_ids() {
 }
 
 
-#	$1 : Name of the cluster as specified in it's cluster conf file.
+#	$1 : Name of the cluster 
 create_zk_configuration() {
 	echo "Creating zookeeper configuration file..."
 
@@ -1505,7 +1518,7 @@ create_zk_configuration() {
 }
 
 
-#	$1 : Name of the cluster as specified in it's cluster conf file.
+#	$1 : Name of the cluster 
 distribute_zk_configuration() {
 	echo "Distributing zookeeper configuration..."
 
@@ -1585,15 +1598,9 @@ distribute_zk_configuration() {
 
 # Admin can modify the cluster's zoo.cfg and call this to re-upload 
 # it to entire cluster and restart zookeeper services.
-# $1 : The cluster conf file
+# 	$1 : Name of cluster directory or Path of cluster configuration file.
 update_zk_configuration() {
-	if [ ! -f $1 ]; then
-		printf "Configuration file $1 not found.\nUsage: zookeeper-cluster-linode.sh update-zoo-cfg CLUSTER-CONF-FILE API-ENV-FILE\n"
-		return 1
-	fi
-	
-	init_conf $1
-	if [ $? -eq 1 ]; then
+	if ! load_cluster_conf "$1"; then
 		return 1
 	fi
 
@@ -1619,7 +1626,7 @@ update_zk_configuration() {
 
 
 
-#	$1 : Name of the cluster as specified in it's cluster conf file.
+#	$1 : Name of the cluster 
 create_cluster_security_configurations() {
 	local stfile="$(status_file)"
 	
@@ -1687,7 +1694,7 @@ create_cluster_security_configurations() {
 }
 
 
-#	$1 : Name of the cluster as specified in it's cluster conf file.
+#	$1 : Name of the cluster 
 distribute_cluster_security_configurations() { 
 	local stfile="$(status_file)"
 
@@ -1736,10 +1743,10 @@ distribute_cluster_security_configurations() {
 }
 
 
-#	$1 : the cluster conf file.
+# 	$1 : Name of cluster directory or Path of cluster configuration file.
 create_cluster_whitelist() {
-	init_conf $1
-	if [ $? -eq 1 ]; then
+	
+	if ! load_cluster_conf "$1"; then
 		return 1
 	fi
 	
@@ -1772,19 +1779,13 @@ create_cluster_whitelist_internal() {
 }
 
 
-#	$1 : the cluster conf file.
+# 	$1 : Name of cluster directory or Path of cluster configuration file.
 #	$2 : the path of ipsets whitelist file of other cluster, relative to script directory.
 add_to_whitelist() {
-	if [ ! -f $1 ]; then
-		printf "Configuration file $1 not found.\nUsage: zookeeper-cluster.sh start CLUSTER-CONF-FILE\n"
+
+	if ! load_cluster_conf "$1"; then
 		return 1
 	fi
-
-	init_conf $1
-	if [ $? -eq 1 ]; then
-		return 1
-	fi
-
 	
 	local stfile=$(status_file)
 	if [ ! -f "$stfile" ]; then
@@ -1823,16 +1824,11 @@ add_to_whitelist() {
 }
 
 
-#	$1 : the cluster conf file.
+# 	$1 : Name of cluster directory or Path of cluster configuration file.
 #	$2 : the name of whitelist file of other cluster, in ipsets format.
 remove_from_whitelist() {
-	if [ ! -f $1 ]; then
-		printf "Configuration file $1 not found.\nUsage: zookeeper-cluster.sh start CLUSTER-CONF-FILE\n"
-		return 1
-	fi
 
-	init_conf $1
-	if [ $? -eq 1 ]; then
+	if ! load_cluster_conf "$1"; then
 		return 1
 	fi
 
@@ -1868,12 +1864,12 @@ remove_from_whitelist() {
 }
 
 
-#	$1: cluster conf file
+# 	$1 : Name of cluster directory or Path of cluster configuration file.
 update_firewall() {
-	init_conf $1
-	if [ $? -eq 1 ]; then
+	if ! load_cluster_conf "$1"; then
 		return 1
 	fi
+
 
 
 	create_cluster_security_configurations $CLUSTER_NAME
@@ -1889,7 +1885,7 @@ update_firewall() {
 
 
 
-#	$1 : Name of the cluster as specified in it's cluster conf file.
+#	$1 : Name of the cluster 
 start_zookeeper() {
 	echo "Starting zookeeper service on cluster..."
 
@@ -1919,7 +1915,7 @@ start_zookeeper() {
 
 
 
-#	$1 : Name of the cluster as specified in it's cluster conf file.
+#	$1 : Name of the cluster 
 stop_zookeeper() {
 	echo "Stopping zookeeper service on cluster..."
 	
@@ -1952,15 +1948,9 @@ stop_zookeeper() {
 }
 
 
-# $1 : The cluster conf file
+# 	$1 : Name of cluster directory or Path of cluster configuration file.
 describe_cluster() {
-	if [ ! -f $1 ]; then
-		printf "Configuration file $1 not found.\nUsage: zookeeper-cluster-linode.sh describe CLUSTER-CONF-FILE\n"
-		return 1
-	fi
-	
-	init_conf $1
-	if [ $? -eq 1 ]; then
+	if ! load_cluster_conf "$1"; then
 		return 1
 	fi
 
@@ -2011,16 +2001,11 @@ describe_cluster() {
 
 
 
-# $1 : The cluster conf file
+# 	$1 : Name of cluster directory or Path of cluster configuration file.
 # $2... : Command to be run on all nodes of cluster.
 run_cmd() {
-	if [ ! -f $1 ]; then
-		printf "Configuration file $1 not found.\nUsage: zookeeper-cluster-linode.sh run CLUSTER-CONF-FILE COMMAND\n"
-		return 1
-	fi
-	
-	init_conf $1
-	if [ $? -eq 1 ]; then
+
+	if ! load_cluster_conf "$1"; then
 		return 1
 	fi
 
@@ -2060,17 +2045,12 @@ run_cmd() {
 
 
 
-# $1 : The cluster conf file
+# 	$1 : Name of cluster directory or Path of cluster configuration file.
 # $2 : Destination directory where files are copied on all nodes of cluster.
 # $3... : List of local files to upload
 copy_files() {
-	if [ ! -f $1 ]; then
-		printf "Configuration file $1 not found.\nUsage: zookeeper-cluster-linode.sh cp CLUSTER-CONF-FILE API-ENV-FILE DESTINATION-DIR FILE1 FILE2...\n"
-		return 1
-	fi
-	
-	init_conf $1
-	if [ $? -eq 1 ]; then
+
+	if ! load_cluster_conf "$1"; then
 		return 1
 	fi
 
@@ -2116,9 +2096,7 @@ copy_files() {
 list_plans() {
 	
 	# Include the specified API environment variables.
-	. $1
-	validate_api_env_configuration
-	if [ $? -eq 1 ]; then
+	if ! load_api_env_configuration "$1"; then
 		return 1
 	fi
 	
@@ -2134,9 +2112,7 @@ list_plans() {
 list_datacenters() {
 	
 	# Include the specified API environment variables.
-	. $1
-	validate_api_env_configuration
-	if [ $? -eq 1 ]; then
+	if ! load_api_env_configuration "$1"; then
 		return 1
 	fi
 	
@@ -2150,9 +2126,7 @@ list_datacenters() {
 list_distributions() {
 	
 	# Include the specified API environment variables.
-	. $1
-	validate_api_env_configuration
-	if [ $? -eq 1 ]; then
+	if ! load_api_env_configuration "$1"; then
 		return 1
 	fi
 	
@@ -2169,9 +2143,7 @@ list_distributions() {
 list_kernels() {
 	
 	# Include the specified API environment variables.
-	. $1
-	validate_api_env_configuration
-	if [ $? -eq 1 ]; then
+	if ! load_api_env_configuration "$1"; then
 		return 1
 	fi
 	
@@ -2236,9 +2208,14 @@ check_image_dir_exists() {
 #		absolute or relative path of image conf file in image directory.
 load_image_conf() {
 	
+	if [ -z "$1" ]; then
+		echo "Error: Provide an image name or image directory path or image configuration file path"
+		return 1
+	fi
+
 	# readlink -m converts a name to an absolute path, even if some path components 
 	# are non existent. 
-	# A simple name like "zkcluster1" is treated like a relative path and becomes <ABSOLUTE_CURRENT_DIR>/zkcluster1
+	# A simple name like "zkimage1" is treated like a relative path and becomes <ABSOLUTE_CURRENT_DIR>/zkimage1
 	# Similarly other relative paths with "./" or "../"
 	local param_full_path=$(readlink -m "$1")
 	
@@ -2250,7 +2227,7 @@ load_image_conf() {
 		IMAGE_CONF_DIR="$(dirname $IMAGE_CONF_FILE)"
 		
 		if [ ! -f "$IMAGE_CONF_FILE" ]; then
-			echo "Error: '$1' does not seem to be a valid image name or image directory. Could not find image conf file '$IMAGE_CONF_FILE'"
+			echo "Error: '$1' does not seem to be a valid image name or image directory. Could not find image configuration file '$IMAGE_CONF_FILE'"
 			return 1
 		fi
 		
@@ -2262,12 +2239,12 @@ load_image_conf() {
 		
 		local param_basename=$(basename "$param_full_path")
 		if [ "$param_basename" != "$IMAGE_NAME.conf" ]; then
-			echo "Error: '$1' does not seem to be a valid image conf filename. Expected image conf filename '$IMAGE_CONF_FILE'"
+			echo "Error: '$1' does not seem to be a valid image configuration filename. Expected image configuration filename '$IMAGE_CONF_FILE'"
 			return 1
 		fi 
 		
 		if [ ! -f "$IMAGE_CONF_FILE" ]; then
-			echo "Error: Image conf file '$IMAGE_CONF_FILE' does not exist."
+			echo "Error: Image configuration file '$IMAGE_CONF_FILE' does not exist."
 			return 1
 		fi
 		
@@ -2392,34 +2369,70 @@ validate_image_configuration() {
 }
 
 
-# Caller is expected to have included the cluster configuration file in environment
-# prior to calling this.
-validate_cluster_configuration() {
-	local invalid=0
+# $1 -> Cluster name, or absolute or relative path of cluster directory
+check_cluster_dir_exists() {
 	
-	# Cluster name checks:
-	# Cluster name should not be undefined.
-	if [ "$CLUSTER_NAME" == "" ]; then
-		echo "Validation error: Invalid cluster configuration - CLUSTER_NAME should not be empty"
+	# "dirname" lets us differentiate between a path with slashes, or just a simple
+	# name. If there are no slashes, dirname simply returns ".".
+	# "basename" extracts the last non slash component.
+	# "readlink -m" converts relative path to absolute path, regardless of any missing
+	#	path components.
+	# "readlink -e" converts relative path to absolute path, but if any missing
+	#	path components, it doesn't return the full path.
+	local cluster_full_path=$(readlink -m "$1")
+	CLUSTER_NAME=$(basename "$cluster_full_path")
+	local cluster_parent=$(dirname "$cluster_full_path")
+	
+	if [ -d "$cluster_full_path" ]; then
+		return 0
+	fi
+	
+	return 1
+}
+
+
+# $1 -> Cluster name
+validate_cluster_name() {
+	# - Shouldn't be empty.
+	# - Only alphabets, digits, hyphens, underscores
+	# - 25 character restriction, since cluster name is part of ipset names.
+	# - Should be unique. 
+
+	local invalid=0
+	if [ "$1" == "" ]; then
+		echo "Validation error: Cluster name should not be empty"
 		invalid=1
 		
 	else
 	
 		# Should contain only alphabets, digits, hyphens and underscores.
-		local strip_allowed=$(printf "$CLUSTER_NAME"|tr -d "[=-=][_][:digit:][:alpha:]")
+		local strip_allowed=$(printf "$1"|tr -d "[=-=][_][:digit:][:alpha:]")
 		local len_notallowedchars=$(printf "$strip_allowed"|wc -m)
 		if [ $len_notallowedchars -gt 0 ]; then
-			echo "Validation error: Invalid cluster configuration - CLUSTER_NAME can have only alphabets, digits, hyphens and underscores. No whitespaces or special characters."
+			echo "Validation error: Cluster name can have only alphabets, digits, hyphens and underscores. No whitespaces or special characters."
 			invalid=1
 		fi
 		
 		# Should be maximum 25 characters at most.
-		local len=$(printf "$CLUSTER_NAME"|wc -m)
+		local len=$(printf "$1"|wc -m)
 		if [ $len -gt 25 ]; then
-			echo "Validation error: Invalid cluster configuration - CLUSTER_NAME cannot have more than 25 characters."
+			echo "Validation error: Cluster name cannot have more than 25 characters."
 			invalid=1
 		fi
+
 	fi
+
+	return $invalid
+}
+
+
+
+
+
+# Caller is expected to have included the cluster configuration file in environment
+# prior to calling this.
+validate_cluster_configuration() {
+	local invalid=0
 	
 	if [ -z "$ZK_IMAGE_CONF" ]; then
 		echo "Validation error: ZK_IMAGE_CONF should be the path of a image configuration file"
@@ -2454,7 +2467,15 @@ validate_cluster_configuration() {
 
 # Caller is expected to have included the cluster configuration file in environment
 # prior to calling this.
-validate_api_env_configuration() {
+load_api_env_configuration() {
+	
+	if [ -z "$1" ]; then
+		echo "Error: Missing API configuration file"
+		return 1
+	fi
+	
+	source "$1"
+
 	local invalid=0
 	
 	if [ -z "$LINODE_KEY" ]; then
@@ -2468,7 +2489,7 @@ validate_api_env_configuration() {
 	fi
 	
 	if [ -z "$CLUSTER_MANAGER_NODE_PASSWORD" ]; then
-		echo "Validation error: CLUSTER_MANAGER_NODE_PASSWORD should be the password of the clustermgr user on cluster manager node."
+		echo "Validation error: Invalid API configuration file - CLUSTER_MANAGER_NODE_PASSWORD should be the password of the clustermgr user on cluster manager node."
 		invalid=1
 	fi
 	
