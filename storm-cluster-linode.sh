@@ -10,57 +10,116 @@
 SSH_AUTH_SOCK=0
 export SSH_AUTH_SOCK
 
-# $1 : Name of cluster configuration file
-init_conf() {
+# $1 -> Cluster name, or absolute or relative path of cluster directory, or
+#		absolute or relative path of cluster conf file in cluster directory.
+load_cluster_conf() {
 	
+	if [ -z "$1" ]; then
+		echo "Error: Provide a cluster name or cluster directory path or cluster configuration file path"
+		return 1
+	fi
+	
+	local param_full_path=$(readlink -m "$1")
+	
+	if [ -d "$param_full_path" ]; then
+		# Check that there is a $CLUSTER_NAME.conf in the directory and it is
+		# a proper cluster conf.
+		CLUSTER_NAME=$(basename "$param_full_path")
+		CLUSTER_CONF_FILE="$param_full_path/$CLUSTER_NAME.conf"
+		CLUSTER_CONF_DIR="$(dirname $CLUSTER_CONF_FILE)"
+		
+		if [ ! -f "$CLUSTER_CONF_FILE" ]; then
+			echo "Error: '$1' does not seem to be a valid cluster name or cluster directory. Could not find cluster configuration file '$CLUSTER_CONF_FILE'"
+			return 1
+		fi
+		
+	elif [ -f "$param_full_path" ]; then
+		# The given file may be any file at all, but what we want is a conf file with the correct cluster name.
+		CLUSTER_NAME=$(basename $(dirname "$param_full_path"))
+		CLUSTER_CONF_DIR=$(dirname "$param_full_path")
+		CLUSTER_CONF_FILE="$CLUSTER_CONF_DIR/$CLUSTER_NAME.conf"
+		
+		local param_basename=$(basename "$param_full_path")
+		if [ "$param_basename" != "$CLUSTER_NAME.conf" ]; then
+			echo "Error: '$1' does not seem to be a valid cluster configuration filename. Expected cluster configuration filename '$CLUSTER_CONF_FILE'"
+			return 1
+		fi 
+		
+		if [ ! -f "$CLUSTER_CONF_FILE" ]; then
+			echo "Error: Cluster configuration file '$CLUSTER_CONF_FILE' does not exist."
+			return 1
+		fi
+		
+	else
+		echo "Error: '$param_full_path' does not exist."
+		return 1
+	fi
+
+
 	# Absolute paths of this script's directory, and the image conf file's directory.
 	SCRIPT_DIR="$(pwd)"
-	CLUSTER_CONF_DIR="$(readlink -m $(dirname $1))"
-	CLUSTER_CONF_FILE="$(readlink -m $1)"
 	
 	echo "SCRIPT_DIR=$SCRIPT_DIR"
+	echo "CLUSTER_NAME=$CLUSTER_NAME"
 	echo "CLUSTER_CONF_DIR=$CLUSTER_CONF_DIR"
 	echo "CLUSTER_CONF_FILE=$CLUSTER_CONF_FILE"
 	
 	# Include the cluster conf file
-	. $CLUSTER_CONF_FILE
+	source $CLUSTER_CONF_FILE
+
+
 
 	# STORM_IMAGE_CONF may be a path that is relative to the cluster conf file, such
-	# as "../storm-image1/storm-image1.conf" or "./storm-image1/storm-image1.conf" or "storm-image1/storm-image1.conf"
+	# as "../storm-image1/storm-image1.conf" or "../storm-image1" or "/home/clustermgr/storm-linode/storm-image1"
 	# We need to resolve it to its absolute path by prefixing it with  $CLUSTER_CONF_DIR
-	# to get "$CLUSTER_CONF_DIR/../zk-image1/zk-image1.conf
+	# to get "$CLUSTER_CONF_DIR/../storm-image1/storm-image1.conf
+	if [ -z "$STORM_IMAGE_CONF" ]; then
+		echo "Error: STORM_IMAGE_CONF should be a Storm image directory or image configuration file"
+		return 1
+	fi
+	
+	local storm_image_conf
 	if [ "${STORM_IMAGE_CONF:0:1}" == "/" ]; then
 		# It's an absolute path. Retain as it is.
-		IMAGE_CONF_FILE="$STORM_IMAGE_CONF"
+		storm_image_conf="$STORM_IMAGE_CONF"
 	else
 		# It's a relative path. Convert to absolute by prefixing with cluster conf dir.
-		IMAGE_CONF_FILE="$(readlink -m $CLUSTER_CONF_DIR/$STORM_IMAGE_CONF)"
+		storm_image_conf="$(readlink -m $CLUSTER_CONF_DIR/$STORM_IMAGE_CONF)"
 	fi
-	IMAGE_CONF_DIR="$(dirname $IMAGE_CONF_FILE)"
-	echo "IMAGE_CONF_DIR=$IMAGE_CONF_DIR"
-	echo "IMAGE_CONF_FILE=$IMAGE_CONF_FILE"
+	
+	if ! load_image_conf "$storm_image_conf"; then
+		echo "Error: Change value of STORM_IMAGE_CONF to an existing Storm image directory or image configuration file path."
+		return 1
+	fi
 
-	ZK_CLUSTER_CONF_FILE="$ZOOKEEPER_CLUSTER"
+
+	# We need Zookeeper cluster name as well as cluster directory for many operations in this script.
+	# So validate the path pointed by ZOOKEEPER_CLUSTER.
+	# ZOOKEEPER_CLUSTER may be a path that is relative to the cluster conf file, such
+	# as "../zk-cluster1/zk-cluster1.conf" or "../zk-cluster1" or "/home/clustermgr/storm-linode/zk-cluster1"
+	# We need to resolve it to its absolute path by prefixing it with  $CLUSTER_CONF_DIR
+	# to get "$CLUSTER_CONF_DIR/../zk-cluster1/zk-cluster1.conf"
+	if [ -z "$ZOOKEEPER_CLUSTER" ]; then
+		echo "Error: ZOOKEEPER_CLUSTER should be a Zookeeper cluster directory or cluster configuration file"
+		return 1
+	fi
+	
+	local zk_cluster_conf="$ZOOKEEPER_CLUSTER"
 	if [ "${ZOOKEEPER_CLUSTER:0:1}" != "/" ]; then
 		# It's a relative path. Convert to absolute by prefixing with cluster conf dir.
-		ZK_CLUSTER_CONF_FILE="$(readlink -m $CLUSTER_CONF_DIR/$ZOOKEEPER_CLUSTER)"
+		zk_cluster_conf="$(readlink -m $CLUSTER_CONF_DIR/$ZOOKEEPER_CLUSTER)"
 	fi
-	ZK_CLUSTER_CONF_DIR="$(dirname $ZK_CLUSTER_CONF_FILE)"
-	echo "ZK_CLUSTER_CONF_DIR=$ZK_CLUSTER_CONF_DIR"
-	echo "ZK_CLUSTER_CONF_FILE=$ZK_CLUSTER_CONF_FILE"
 	
-	validate_cluster_configuration
-	if [ $? -eq 1 ]; then
+	if ! load_zk_conf "$zk_cluster_conf"; then
+		echo "Error: Change value of ZOOKEEPER_CLUSTER to an existing Zookeeper cluster directory or cluster configuration file path."
+		return 1
+	fi
+	
+
+	if ! validate_cluster_configuration; then
 		return 1
 	fi
 
-	# Include the image conf file
-	. $IMAGE_CONF_FILE
-	
-	validate_image_configuration
-	if [ $? -eq 1 ]; then
-		return 1
-	fi
 	
 	NODE_USERNAME=root
 	if [ -z "$NODE_ROOT_SSH_PRIVATE_KEY" ]; then
@@ -71,20 +130,82 @@ init_conf() {
 }
 
 
+# $1 -> ZK cluster name, or absolute or relative path of cluster directory, or
+#		absolute or relative path of cluster conf file in cluster directory.
+load_zk_conf() {
+	
+	local param_full_path=$(readlink -m "$1")
+	
+	if [ -d "$param_full_path" ]; then
+		# Check that there is a $CLUSTER_NAME.conf in the directory and it is
+		# a proper cluster conf.
+		ZK_CLUSTER_NAME=$(basename "$param_full_path")
+		ZK_CLUSTER_CONF_FILE="$param_full_path/$ZK_CLUSTER_NAME.conf"
+		ZK_CLUSTER_CONF_DIR="$(dirname $ZK_CLUSTER_CONF_FILE)"
+		
+		if [ ! -f "$ZK_CLUSTER_CONF_FILE" ]; then
+			printf "Error: '$1' does not seem to be a valid Zookeeper cluster name or cluster directory\n."
+			printf "Could not find cluster configuration file '$ZK_CLUSTER_CONF_FILE'\n"
+			return 1
+		fi
+		
+	elif [ -f "$param_full_path" ]; then
+		# The given file may be any file at all, but what we want is a conf file with the correct cluster name.
+		ZK_CLUSTER_NAME=$(basename $(dirname "$param_full_path"))
+		ZK_CLUSTER_CONF_DIR=$(dirname "$param_full_path")
+		ZK_CLUSTER_CONF_FILE="$ZK_CLUSTER_CONF_DIR/$ZK_CLUSTER_NAME.conf"
+		
+		local param_basename=$(basename "$param_full_path")
+		if [ "$param_basename" != "$ZK_CLUSTER_NAME.conf" ]; then
+			printf "Error: '$1' does not seem to be a valid Zookeeper cluster configuration filename.\n"
+			printf "Expected cluster configuration filename '$ZK_CLUSTER_CONF_FILE'\n"
+			return 1
+		fi 
+		
+		if [ ! -f "$ZK_CLUSTER_CONF_FILE" ]; then
+			echo "Error: Zookeeper Cluster configuration file '$ZK_CLUSTER_CONF_FILE' does not exist."
+			return 1
+		fi
+		
+	else
+		echo "Error: Zookeeper Cluster configuration '$param_full_path' does not exist."
+		return 1
+	fi
 
-# $1 : Image directory name
+
+	echo "ZK_CLUSTER_NAME=$ZK_CLUSTER_NAME"
+	echo "ZK_CLUSTER_CONF_DIR=$ZK_CLUSTER_CONF_DIR"
+	echo "ZK_CLUSTER_CONF_FILE=$ZK_CLUSTER_CONF_FILE"
+
+	return 0
+}
+
+
+
+# $1 : Image name, or a target directory as absolute or relative path
 create_new_image_conf() {
+	
+	if check_image_dir_exists "$1"; then
+		echo "Validation error: Image '$1' already exists. Provide a unique name or directory."
+		return 1
+	fi
+	
+	echo "IMAGE_NAME=$IMAGE_NAME"
+	if ! validate_image_name "$IMAGE_NAME"; then
+		return 1
+	fi
+	
 	mkdir -p "$1"
 	
-	cp storm-image-example.conf "$1/$1.conf"
+	cp storm-image-example.conf "$1/$IMAGE_NAME.conf"
 	cp template-storm.yaml "$1/"
 	cp template-storm-supervisord.conf "$1/"
 	
 	chmod go-rwx $1/*
 	
 	echo "Created image directory $1. "
-	echo "Edit $1/$1.conf to enter mandatory properties, and then create the image with "
-	echo "    storm-cluster-linode.sh create-image $1/$1.conf <API-ENV-CONF-FILE>"
+	echo "Edit $1/$IMAGE_NAME.conf to enter mandatory properties, and then create the image with "
+	echo "    storm-cluster-linode.sh create-image $1 <API-ENV-CONF-FILE>"
 	
 }
 
@@ -94,32 +215,12 @@ create_new_image_conf() {
 #		 common configuration options.
 #	$2 : Name of API environment configuration file containing API endpoint and key.
 create_storm_image() {
-	if [ ! -f $1 ]; then
-		printf "Configuration file $1 not found.\nUsage: storm-cluster-linode.sh create-image CONF-FILE API-ENV-FILE\n"
+
+	if ! load_image_conf "$1"; then
 		return 1
 	fi
 
-	# Absolute paths of this script's directory, and the image conf file's directory.
-	SCRIPT_DIR="$(pwd)"
-	IMAGE_CONF_FILE="$(readlink -m $1)"
-	IMAGE_CONF_DIR="$(dirname $IMAGE_CONF_FILE)"
-	
-	echo "SCRIPT_DIR=$SCRIPT_DIR"
-	echo "IMAGE_CONF_DIR=$IMAGE_CONF_DIR"
-	echo "IMAGE_CONF_FILE=$IMAGE_CONF_FILE"
-	
-
-	# Include the specified configuration file with template creation environment variables, and the
-	# API endpoint configuration file.
-	. $1
-	validate_image_configuration
-	if [ $? -eq 1 ]; then
-		return 1
-	fi
-	
-	. $2
-	validate_api_env_configuration
-	if [ $? -eq 1 ]; then
+	if ! load_api_env_configuration "$2"; then
 		return 1
 	fi
 	
@@ -131,12 +232,37 @@ create_storm_image() {
 		echo "Image is already created or is being created. Nothing further to do..."
 		return 1
 	fi
+
+	local linout linerr linret
 	
+	# There are limits on both number of images (max 3) and total size across
+	# images (10240MB). If these limits are reached or close to breaching, warn user
+	# and prevent disk imaging.
+	echo "Image prechecks"
+	linode_api linout linerr linret "imagestats"
+	if [ $linret -eq 1 ]; then
+		echo "Failed to get image statistics. Continuing, but there is a chance image creation may fail due to image count and disk size limits. Error:$linerr"
+	else
+		local num_images=$(echo $linout|cut -d ',' -f1)
+		local total_image_size=$(echo $linout|cut -d ',' -f2)
+		
+		if [ $num_images -eq 3 ]; then
+			printf "Error: Cannot create image because account limit of 3 images have already been created.\n"
+			printf "Please delete an image using 'delete-image' or from 'Linode Manager' before retrying.\n"
+			return 1
+		fi
+		
+		if [ $total_image_size -ge 9000 ]; then
+			printf "Warning: Total size of existing images $total_image_size MB is close to maximum limit of 10240 MB.\n"
+			printf "There's a chance this image creation may fail.\n"
+			printf "If it does, delete an existing image and try again.\n"
+		fi
+	fi
+
 	create_image_status_file
 	
 	# Create temporary linode of lowest cost plan in specified datacenter.
 	echo "Creating temporary linode"
-	local linout linerr linret
 	linode_api linout linerr linret "create-node" 1 "$DATACENTER_FOR_IMAGE"
 	if [ $linret -eq 1 ]; then
 		echo "Failed to create temporary linode. Error:$linerr"
@@ -299,25 +425,12 @@ create_storm_image() {
 #		 common configuration options.
 #	$2 : Name of API environment configuration file containing API endpoint and key.
 delete_storm_image() {
-	if [ ! -f $1 ]; then
-		printf "Configuration file $1 not found.\nUsage: storm-cluster-linode.sh delete-image CONF-FILE API-ENV-FILE\n"
+
+	if ! load_image_conf "$1"; then
 		return 1
 	fi
 
-	# Absolute paths of this script's directory, and the image conf file's directory.
-	SCRIPT_DIR="$(pwd)"
-	IMAGE_CONF_FILE="$(readlink -m $1)"
-	IMAGE_CONF_DIR="$(dirname $IMAGE_CONF_FILE)"
-	
-	echo "SCRIPT_DIR=$SCRIPT_DIR"
-	echo "IMAGE_CONF_DIR=$IMAGE_CONF_DIR"
-	echo "IMAGE_CONF_FILE=$IMAGE_CONF_FILE"
-	
-
-	# Include API endpoint configuration file.
-	. $2
-	validate_api_env_configuration
-	if [ $? -eq 1 ]; then
+	if ! load_api_env_configuration "$2"; then
 		return 1
 	fi
 	
@@ -346,14 +459,25 @@ delete_storm_image() {
 
 # $1 : Cluster directory name
 create_new_cluster_conf() {
+	
+	if check_cluster_dir_exists "$1"; then
+		echo "Validation error: Cluster '$1' already exists. Provide a unique name or directory."
+		return 1
+	fi
+	
+	echo "CLUSTER_NAME=$CLUSTER_NAME"
+	if ! validate_cluster_name "$CLUSTER_NAME"; then
+		return 1
+	fi
+	
 	mkdir -p "$1"
 	
-	cp storm-cluster-example.conf "$1/$1.conf"
-	chmod go-rwx "$1/$1.conf"
+	cp storm-cluster-example.conf "$1/$CLUSTER_NAME.conf"
+	chmod go-rwx "$1/$CLUSTER_NAME.conf"
 	
 	echo "Created cluster directory $1. "
-	echo "Edit $1/$1.conf to enter mandatory properties, and then create the cluster with "
-	echo "    storm-cluster-linode.sh create $1/$1.conf <API-ENV-CONF-FILE>"
+	echo "Edit $1/$CLUSTER_NAME.conf to enter mandatory properties, and then create the cluster with "
+	echo "    storm-cluster-linode.sh create $1 <API-ENV-CONF-FILE>"
 	
 }
 
@@ -361,27 +485,21 @@ create_new_cluster_conf() {
 
 
 
-# 	$1 : Name of configuration file
+# 	$1 : Name of cluster directory or Path of cluster configuration file.
 #	$2 : The API environment configuration file
 #	$3 : (Optional) If this is "--dontshutdown", then nodes are not stopped after creation. This option should be passed
 #			only by start cluster. By default, nodes are shutdown after creation
 create_cluster() {
-	if [ ! -f $1 ]; then
-		printf "Configuration file $1 not found.\nUsage: storm-cluster.sh create CLUSTER-CONF-FILE\n"
-		return 1
-	fi
 
 	# Include the specified configuration file with cluster specific environment variables.
-	init_conf $1
-	if [ $? -eq 1 ]; then
+	if ! load_cluster_conf "$1"; then
+		return 1
+	fi
+	
+	if ! load_api_env_configuration "$2"; then
 		return 1
 	fi
 
-	. $2
-	validate_api_env_configuration
-	if [ $? -eq 1 ]; then
-		return 1
-	fi
 
 	local stfile=$(status_file)
 	if [ -f "$stfile" ]; then
@@ -396,7 +514,7 @@ create_cluster() {
 	# does not exist, then create the cluster.
 	# TODO handle zookeeper cluster creation errors better. Its possible outcomes are
 	#	created | not created because it already exists | creation failed
-	./zookeeper-cluster-linode.sh create $ZK_CLUSTER_CONF_FILE $2
+	./zookeeper-cluster-linode.sh create "$ZK_CLUSTER_CONF_FILE" "$2"
 	
 	create_status_file
 
@@ -455,28 +573,20 @@ create_cluster() {
 
 
 
-#	$1: cluster conf file
+# 	$1 : Name of cluster directory or Path of cluster configuration file.
 #	$2 : The API environment configuration file
 start_cluster() {
-	if [ ! -f $1 ]; then
-		printf "Configuration file $1 not found.\nUsage: storm-cluster.sh start CLUSTER-CONF-FILE\n"
+
+	if ! load_cluster_conf "$1"; then
 		return 1
 	fi
-
-	init_conf $1
-	if [ $? -eq 1 ]; then
-		return 1
-	fi
-
-	. $2
-	validate_api_env_configuration
-	if [ $? -eq 1 ]; then
+	
+	if ! load_api_env_configuration "$2"; then
 		return 1
 	fi
 
 	echo "Starting Storm cluster $CLUSTER_NAME..."
 
-	
 	# If the cluster is not yet created, it should be first created along with all steps like 
 	#	- getting IP addresses
 	#	- setting hostnames
@@ -490,7 +600,7 @@ start_cluster() {
 	if [ ! -f "$stfile" ]; then
 		# Status file does not exist, which means cluster is not created.
 		# So everything is done by create_cluster, and this function should just start storm service on all nodes.
-		create_cluster $1 $2 "--dontshutdown"
+		create_cluster "$1" "$2" "--dontshutdown"
 
 	else
 		local status=$(get_cluster_status)
@@ -520,24 +630,29 @@ start_cluster() {
 
 		update_cluster_status "starting"
 	
-		# Since ZK host file too is distributed to all storm hosts, the zk cluster should be started before distributing hosts.
-		# However it's possible that ZK cluster is not yet created and so its hosts are not known.
-		# If so, then distribute hosts after ZK cluster start.
-		local zkcluster=$(ZK_CLUSTER_CONF_FILE=$ZK_CLUSTER_CONF_FILE sh -c '. $ZK_CLUSTER_CONF_FILE; echo $CLUSTER_NAME')
-		local zkhostsfile="$ZK_CLUSTER_CONF_DIR/$zkcluster.hosts"		
-		local zkhostsfound=1
-		if [ ! -f "$zkhostsfile" ]; then
-			zkhostsfound=0
-		fi
-		
-		./zookeeper-cluster-linode.sh start $ZK_CLUSTER_CONF_FILE $2
+		./zookeeper-cluster-linode.sh start "$ZK_CLUSTER_CONF_FILE" "$2"
 		
 		start_nodes $CLUSTER_NAME
 		
-		if [ $zkhostsfound -eq 0 ]; then
-			if [ -f "$zkhostsfile" ]; then
-				distribute_hostsfile $CLUSTER_NAME
-			fi
+		# If nodes were added when cluster was stopped, we need all nodes
+		# to know about all other nodes.
+		distribute_hostsfile $CLUSTER_NAME
+			
+		# The cluster security configuration may have changed if nodes were added or 
+		# admin updated the firewall rules while cluster was stopped.
+		# If so, security configuration should  distributed.
+		local security_status=$(get_security_status)
+		if [ "$security_status" == "changed" ]; then
+			echo "Security configuration has changed. Applying new configuration"
+			
+			# If any new supervisor nodes were added when cluster was stopped,
+			# they have to be integrated with reverse web proxy running on client
+			# node, to make their log files available via storm web UI.
+			configure_client_reverse_proxy $CLUSTER_NAME
+			
+			distribute_cluster_security_configurations $CLUSTER_NAME
+			
+			update_security_status "unchanged"
 		fi
 
 		# The cluster storm configuration may have been changed by admin.
@@ -550,15 +665,6 @@ start_cluster() {
 			update_conf_status "unchanged"
 		fi
 		
-		# The cluster security configuration may have changed if admin updated the firewall rules. 
-		# If so, security configuration should  distributed.
-		local security_status=$(get_security_status)
-		if [ "$security_status" == "changed" ]; then
-			echo "Security configuration has changed. Applying new configuration"
-			distribute_cluster_security_configurations $CLUSTER_NAME
-			
-			update_security_status "unchanged"
-		fi
 	fi
 	
 	# For newly created or restarted, we need to start the storm services.
@@ -574,24 +680,18 @@ start_cluster() {
 
 
 
-#	$1: cluster conf file
+# 	$1 : Name of cluster directory or Path of cluster configuration file.
 #	$2 : The API environment configuration file
 stop_cluster() {
-	if [ ! -f $1 ]; then
-		printf "Configuration file $1 not found.\nUsage: storm-cluster.sh shutdown CLUSTER-CONF-FILE\n"
+
+	if ! load_cluster_conf "$1"; then
+		return 1
+	fi
+	
+	if ! load_api_env_configuration "$2"; then
 		return 1
 	fi
 
-	init_conf $1
-	if [ $? -eq 1 ]; then
-		return 1
-	fi
-
-	. $2
-	validate_api_env_configuration
-	if [ $? -eq 1 ]; then
-		return 1
-	fi
 
 	echo "Stopping cluster $CLUSTER_NAME..."
 
@@ -628,13 +728,29 @@ create_new_nodes() {
 	local dc_id=$linout
 	echo "Datacenter ID=$dc_id"
 	
-	# Get the name of image from the image conf being used by this cluster.
-	linode_api linout linerr linret "image-id" "$LABEL_FOR_IMAGE"
-	if [ $linret -eq 1 ]; then
-		echo "Failed to find image. Error:$linerr"
+	# Get the image id from the image info file. If there is no image info file,
+	# then try to find using API. 
+	local img_stfile="$(image_status_file)"
+	local image_id
+	if [ -f "$img_stfile" ]; then
+		image_id=$(get_section $img_stfile "image")
+	fi
+	
+	if [ -z "$image_id" ]; then
+		echo "Unable to get image ID from image info file. Searching for image using label..."
+		linode_api linout linerr linret "image-id" "$LABEL_FOR_IMAGE"
+		if [ $linret -eq 1 ]; then
+			echo "Failed to find image. Error:$linerr"
+			return 1
+		fi
+		image_id=$(echo $linout|cut -d ',' -f1)
+	fi
+	
+	if [ -z "$image_id" ]; then
+		echo "Failed to find image."
 		return 1
 	fi
-	local image_id=$(echo $linout|cut -d ',' -f1)
+	
 	echo "Image ID=$image_id"
 	
 	# Get the kernel ID.
@@ -702,7 +818,7 @@ create_new_nodes() {
 }
 
 
-# $1 : Cluster name as in cluster conf file
+# $1 : Cluster name 
 # $2 : Plan for supervisor nodes (ex: "2GB:1 4GB:1 8GB:1")
 # $3 : Datacenter ID
 # $4 : Image ID
@@ -803,7 +919,7 @@ get_plan_id() {
 }
 
 
-# $1 : Cluster name as in cluster conf file
+# $1 : Cluster name 
 # $2 : The Plan ID
 # $3 : The datacenter ID (this has to be already validated by caller)
 # $4 : The image ID
@@ -929,24 +1045,18 @@ create_single_node() {
 
 
 
-#	$1 : The cluster conf file.
+# 	$1 : Name of cluster directory or Path of cluster configuration file.
 #	$2 : The API environment configuration file
 destroy_cluster() {
-	if [ ! -f $1 ]; then
-		printf "Configuration file $1 not found.\nUsage: storm-cluster.sh destroy CLUSTER-CONF-FILE API-ENV-FILE\n"
+
+	if ! load_cluster_conf "$1"; then
+		return 1
+	fi
+	
+	if ! load_api_env_configuration "$2"; then
 		return 1
 	fi
 
-	init_conf $1
-	if [ $? -eq 1 ]; then
-		return 1
-	fi
-
-	. $2
-	validate_api_env_configuration
-	if [ $? -eq 1 ]; then
-		return 1
-	fi
 
 	local stfile=$(status_file)
 
@@ -1027,7 +1137,7 @@ destroy_cluster() {
 		# Inform zookeeper cluster to remove this cluster's whitelist from its whitelists.
 		# It expects the whitelist file path to be relative to scripts directory.
 		local storm_cluster_whitelist_file="$(basename $CLUSTER_CONF_DIR)/$CLUSTER_NAME-whitelist.ipsets"
-		./zookeeper-cluster-linode.sh "remove-whitelist" $ZK_CLUSTER_CONF_FILE $storm_cluster_whitelist_file
+		./zookeeper-cluster-linode.sh "remove-whitelist" "$ZK_CLUSTER_CONF_FILE" "$storm_cluster_whitelist_file"
 
 		# Delete the host entries from this cluster manager machine on which this script is running.
 		echo $CLUSTER_MANAGER_NODE_PASSWORD|sudo -S sh hostname_manager.sh "delete-cluster" $CLUSTER_NAME
@@ -1099,7 +1209,7 @@ start_nodes() {
 
 
 
-#	$1 : Name of the cluster as specified in it's cluster conf file.
+#	$1 : Name of the cluster 
 #	$2: (Optional) filter for entries in "nodes" section. Only these nodes will be stopped.
 stop_nodes() {
 	local stfile="$(status_file)"
@@ -1152,7 +1262,7 @@ stop_nodes() {
 }
 
 
-#	$1 : Name of the cluster as specified in it's cluster conf file.
+#	$1 : Name of the cluster 
 #	$2: (Optional) filter for entries in "nodes" section. Only these nodes' host keys will be regenerated.
 change_hostkeys() {
 	local stfile="$(status_file)"
@@ -1189,7 +1299,7 @@ change_hostkeys() {
 
 
 
-#	$1 : Name of the cluster as specified in it's cluster conf file.
+#	$1 : Name of the cluster 
 #	$2: (Optional) filter for entries in "nodes" section. Only these nodes' hostnames will be changed.
 set_hostnames() {
 	local stfile="$(status_file)"
@@ -1299,7 +1409,7 @@ set_hostname() {
 
 
 
-#	$1 : Name of the cluster as specified in it's cluster conf file.
+#	$1 : Name of the cluster 
 distribute_hostsfile() {
 	local stfile="$(status_file)"
 	# Note: output of get_section is multiline, so always use it inside double quotes such as "$entries"
@@ -1341,8 +1451,7 @@ distribute_hostsfile() {
 	# that as a variable assignment for the subshell.
 	# For some reason, this
 	# command works correctly when sh -c 'cmd' is in single quotes but not when it's in double quotes??
-	local zkcluster=$(ZK_CLUSTER_CONF_FILE=$ZK_CLUSTER_CONF_FILE sh -c '. $ZK_CLUSTER_CONF_FILE; echo $CLUSTER_NAME')
-	local zkhostsfile="$ZK_CLUSTER_CONF_DIR/$zkcluster.hosts"
+	local zkhostsfile="$ZK_CLUSTER_CONF_DIR/$ZK_CLUSTER_NAME.hosts"
 
 	while read ipentry;
 	do
@@ -1365,10 +1474,10 @@ distribute_hostsfile() {
 		remote_copyfile ./hostname_manager.sh $target_ip $NODE_USERNAME  $NODE_ROOT_SSH_PRIVATE_KEY hostname_manager.sh
 		
 		remote_copyfile $hostsfile $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY  "$1.hosts"
-		remote_copyfile $zkhostsfile $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY  "$zkcluster.hosts"
+		remote_copyfile $zkhostsfile $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY  "$ZK_CLUSTER_NAME.hosts"
 
 		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY sh hostname_manager.sh "hosts-file" $1 "$1.hosts"
-		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY sh hostname_manager.sh "hosts-file" $zkcluster "$zkcluster.hosts"
+		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY sh hostname_manager.sh "hosts-file" $ZK_CLUSTER_NAME "$ZK_CLUSTER_NAME.hosts"
 		
 	done <<< "$ipaddrs"
 
@@ -1643,7 +1752,7 @@ install_storm_on_node() {
 
 
 
-#	$1 : Name of the cluster as specified in it's cluster conf file.
+#	$1 : Name of the cluster 
 create_storm_configuration() {
 	echo "Creating Storm configuration file..."
 
@@ -1673,9 +1782,7 @@ create_storm_configuration() {
 	add_section $cluster_cfg "zookeeper"		
 	insert_bottom_of_section $cluster_cfg "zookeeper" "storm.zookeeper.servers:"
 
-	local zkcluster=$(ZK_CLUSTER_CONF_FILE=$ZK_CLUSTER_CONF_FILE sh -c '. $ZK_CLUSTER_CONF_FILE; echo $CLUSTER_NAME')
-	echo "Zookeeper cluster name is $zkcluster"
-	local zkhostnames=$(get_section "$ZK_CLUSTER_CONF_DIR/$zkcluster.info" "hostnames")
+	local zkhostnames=$(get_section "$ZK_CLUSTER_CONF_DIR/$ZK_CLUSTER_NAME.info" "hostnames")
 
 	while read zkhostentry; do
 		local hostarr=($zkhostentry)
@@ -1699,7 +1806,7 @@ create_storm_configuration() {
 
 
 
-#	$1 : Name of the cluster as specified in it's cluster conf file.
+#	$1 : Name of the cluster 
 #	$2 : (Optional) Node role filter. The configuration gets distributed only to nodes with this role.
 distribute_storm_configuration() {
 	echo "Distributing storm configuration..."
@@ -1739,7 +1846,7 @@ distribute_storm_configuration() {
 
 
 
-#	$1 : Name of the cluster as specified in it's cluster conf file.
+#	$1 : Name of the cluster 
 #	$2: (Optional) filter for entries in "nodes" section. Storm services will be started only on these nodes.
 start_storm() {
 	# Start nimbus+webui services on nimbus node, because we want REST API access.
@@ -1825,7 +1932,7 @@ start_storm() {
 
 
 
-#	$1 : Name of the cluster as specified in it's cluster conf file.
+#	$1 : Name of the cluster 
 stop_storm() {
 	# Stop the appropriate services on each node.
 
@@ -1961,26 +2068,20 @@ kill_all_topologies() {
 
 
 
-# $1 : The cluster conf file
+# 	$1 : Name of cluster directory or Path of cluster configuration file.
 # $2 : The API environment file
 # $3 : Plans and counts for new supervisor nodes 
 #		(ex: "2GB:1 4GB:1 8GB:1" adds 3 new supervisor nodes, a 2 GB, a 4 GB and a 8 GB)
 add_nodes() {
-	if [ ! -f $1 ]; then
-		printf "Configuration file $1 not found.\nUsage: storm-cluster-linode.sh add-nodes CLUSTER-CONF-FILE API-ENV-FILE NEW-SUPERVISOR-NODES\n"
+	
+	if ! load_cluster_conf "$1"; then
 		return 1
 	fi
 	
-	init_conf $1
-	if [ $? -eq 1 ]; then
+	if ! load_api_env_configuration "$2"; then
 		return 1
 	fi
 
-	. $2
-	validate_api_env_configuration
-	if [ $? -eq 1 ]; then
-		return 1
-	fi
 
 	local stfile="$(status_file)"
 	# If the cluster does not exist, abort this addition.
@@ -2009,14 +2110,31 @@ add_nodes() {
 	local dc_id=$linout
 	echo "Datacenter ID=$dc_id"
 	
-	# Get the name of image from the image conf being used by this cluster.
-	linode_api linout linerr linret "image-id" "$LABEL_FOR_IMAGE"
-	if [ $linret -eq 1 ]; then
-		echo "Failed to find image. Error:$linerr"
+	# Get the image id from the image info file. If there is no image info file,
+	# then try to find using API. 
+	local img_stfile="$(image_status_file)"
+	local image_id
+	if [ -f "$img_stfile" ]; then
+		image_id=$(get_section $img_stfile "image")
+	fi
+	
+	if [ -z "$image_id" ]; then
+		echo "Unable to get image ID from image info file. Searching for image using label..."
+		linode_api linout linerr linret "image-id" "$LABEL_FOR_IMAGE"
+		if [ $linret -eq 1 ]; then
+			echo "Failed to find image. Error:$linerr"
+			return 1
+		fi
+		image_id=$(echo $linout|cut -d ',' -f1)
+	fi
+	
+	if [ -z "$image_id" ]; then
+		echo "Failed to find image."
 		return 1
 	fi
-	local image_id=$(echo $linout|cut -d ',' -f1)
+	
 	echo "Image ID=$image_id"
+	
 	
 	# Get the kernel ID.
 	linode_api linout linerr linret "kernel-id" "$KERNEL_FOR_IMAGE"
@@ -2051,14 +2169,14 @@ add_nodes() {
 	# No need to recreate storm configuration; we just want to distribute it to the new nodes.
 	distribute_storm_configuration $CLUSTER_NAME ":supervisor:new"
 
-	# The new supervisor nodes have to be integrated with reverse web proxy running on client
-	# node, to make their log files available via storm web UI.
-	configure_client_reverse_proxy $CLUSTER_NAME
-	
 	# All storm nodes and zk nodes firewalls have to be updated to 
 	# accept traffic from the new supervisor nodes.
 	create_cluster_security_configurations $CLUSTER_NAME
 	if [ "$cluster_status" == "running" ]; then
+		# The new supervisor nodes have to be integrated with reverse web proxy running on client
+		# node, to make their log files available via storm web UI.
+		configure_client_reverse_proxy $CLUSTER_NAME
+	
 		distribute_cluster_security_configurations $CLUSTER_NAME
 		update_security_status "unchanged"
 	else
@@ -2086,17 +2204,13 @@ add_nodes() {
 
 # Admin can modify the cluster's storm.yaml and call this to re-upload 
 # it to entire cluster and restart zookeeper services.
-# $1 : The cluster conf file
+# 	$1 : Name of cluster directory or Path of cluster configuration file.
 update_storm_yaml() {
-	if [ ! -f $1 ]; then
-		printf "Configuration file $1 not found.\nUsage: storm-cluster-linode.sh update-storm-yaml CLUSTER-CONF-FILE\n"
+
+	if ! load_cluster_conf "$1"; then
 		return 1
 	fi
 	
-	init_conf $1
-	if [ $? -eq 1 ]; then
-		return 1
-	fi
 
 	local cluster_status=$(get_cluster_status)
 	if [ "$cluster_status" == "running" ]; then
@@ -2119,7 +2233,7 @@ update_storm_yaml() {
 
 
 
-#	$1 : Name of the cluster as specified in it's cluster conf file.
+#	$1 : Name of the cluster 
 install_client_reverse_proxy() {
 	echo "Installing reverse proxy web server on client node"
 	
@@ -2149,7 +2263,7 @@ install_client_reverse_proxy() {
 
 
 
-#	$1 : Name of the cluster as specified in it's cluster conf file.
+#	$1 : Name of the cluster 
 configure_client_reverse_proxy() {
 	local stfile="$(status_file)"
 	
@@ -2213,7 +2327,7 @@ configure_client_reverse_proxy() {
 }
 	
 
-#	$1 : Name of the cluster as specified in it's cluster conf file.
+#	$1 : Name of the cluster 
 create_cluster_security_configurations() {
 	local stfile="$(status_file)"
 	
@@ -2250,9 +2364,8 @@ create_cluster_security_configurations() {
 		echo "add $storm_cluster_whitelist_name $private_ip" >> $storm_cluster_whitelist_file
 	done <<< "$ipaddrs"
 
-	./zookeeper-cluster-linode.sh "create-cluster-whitelist" $ZK_CLUSTER_CONF_FILE
-	local zkcluster_name=$(ZK_CLUSTER_CONF_FILE=$ZK_CLUSTER_CONF_FILE sh -c '. $ZK_CLUSTER_CONF_FILE; echo $CLUSTER_NAME')
-	local zk_cluster_whitelist_file="$ZK_CLUSTER_CONF_DIR/$zkcluster_name-whitelist.ipsets"
+	./zookeeper-cluster-linode.sh "create-cluster-whitelist" "$ZK_CLUSTER_CONF_FILE"
+	local zk_cluster_whitelist_file="$ZK_CLUSTER_CONF_DIR/$ZK_CLUSTER_NAME-whitelist.ipsets"
 	
 	local ipsets_file_for_all_nodes="$CLUSTER_CONF_DIR/$CLUSTER_NAME-rules.ipsets"
 	cat $storm_cluster_whitelist_file $zk_cluster_whitelist_file > $ipsets_file_for_all_nodes
@@ -2298,7 +2411,7 @@ create_cluster_security_configurations() {
 	cp $template_v4_rules $storm_iptables_v4_rules_file
 	chmod go-rwx $storm_iptables_v4_rules_file
 	sed -i "s/\$CLUSTER_NAME/$CLUSTER_NAME/g" $storm_iptables_v4_rules_file
-	sed -i "s/\$ZK_CLUSTER_NAME/$zkcluster_name/g" $storm_iptables_v4_rules_file
+	sed -i "s/\$ZK_CLUSTER_NAME/$ZK_CLUSTER_NAME/g" $storm_iptables_v4_rules_file
 
 	local template_v6_rules=$IPTABLES_V6_RULES_TEMPLATE
 	if [ ${template_v6_rules:0:1} != "/" ]; then
@@ -2308,7 +2421,7 @@ create_cluster_security_configurations() {
 	cp $template_v6_rules $storm_iptables_v6_rules_file
 	chmod go-rwx $storm_iptables_v6_rules_file
 	sed -i "s/\$CLUSTER_NAME/$CLUSTER_NAME/g" $storm_iptables_v6_rules_file
-	sed -i "s/\$ZK_CLUSTER_NAME/$zkcluster_name/g" $storm_iptables_v6_rules_file
+	sed -i "s/\$ZK_CLUSTER_NAME/$ZK_CLUSTER_NAME/g" $storm_iptables_v6_rules_file
 	
 	local template_client_v4_rules=$IPTABLES_CLIENT_V4_RULES_TEMPLATE
 	if [ ${template_client_v4_rules:0:1} != "/" ]; then
@@ -2318,10 +2431,10 @@ create_cluster_security_configurations() {
 	cp $template_client_v4_rules $storm_client_iptables_v4_rules_file
 	chmod go-rwx $storm_client_iptables_v4_rules_file
 	sed -i "s/\$CLUSTER_NAME/$CLUSTER_NAME/g" $storm_client_iptables_v4_rules_file
-	sed -i "s/\$ZK_CLUSTER_NAME/$zkcluster_name/g" $storm_client_iptables_v4_rules_file
+	sed -i "s/\$ZK_CLUSTER_NAME/$ZK_CLUSTER_NAME/g" $storm_client_iptables_v4_rules_file
 }
 
-#	$1 : Name of the cluster as specified in it's cluster conf file.
+#	$1 : Name of the cluster 
 distribute_cluster_security_configurations() { 
 	local stfile="$(status_file)"
 
@@ -2388,14 +2501,13 @@ distribute_cluster_security_configurations() {
 	# Tell the zookeeper cluster to add this storm cluster's nodes to *its* whitelist.
 	# It expects the path to be relative to scripts directory. example: storm-cluster1/storm-cluster1-whitelist.ipsets
 	local storm_cluster_whitelist_file="$(basename $CLUSTER_CONF_DIR)/$CLUSTER_NAME-whitelist.ipsets"
-	./zookeeper-cluster-linode.sh "add-whitelist" $ZK_CLUSTER_CONF_FILE $storm_cluster_whitelist_file
+	./zookeeper-cluster-linode.sh "add-whitelist" "$ZK_CLUSTER_CONF_FILE" "$storm_cluster_whitelist_file"
 }
 
 
-#	$1: cluster conf file
+# 	$1 : Name of cluster directory or Path of cluster configuration file.
 update_firewall() {
-	init_conf $1
-	if [ $? -eq 1 ]; then
+	if ! load_cluster_conf "$1"; then
 		return 1
 	fi
 	
@@ -2413,12 +2525,13 @@ update_firewall() {
 
 
 
-#	$1: cluster conf file
+# 	$1 : Name of cluster directory or Path of cluster configuration file.
 update_client_user_whitelist() {
-	init_conf $1
-	if [ $? -eq 1 ]; then
+	
+	if ! load_cluster_conf "$1"; then
 		return 1
 	fi
+	
 
 	local cluster_status=$(get_cluster_status)
 	if [ "$cluster_status" != "running" ]; then
@@ -2430,8 +2543,7 @@ update_client_user_whitelist() {
 
 	local storm_cluster_whitelist_file="$CLUSTER_CONF_DIR/$CLUSTER_NAME-whitelist.ipsets"
 	
-	local zkcluster_name=$(ZK_CLUSTER_CONF_FILE=$ZK_CLUSTER_CONF_FILE sh -c '. $ZK_CLUSTER_CONF_FILE; echo $CLUSTER_NAME')
-	local zk_cluster_whitelist_file="$ZK_CLUSTER_CONF_DIR/$zkcluster_name-whitelist.ipsets"
+	local zk_cluster_whitelist_file="$ZK_CLUSTER_CONF_DIR/$ZK_CLUSTER_NAME-whitelist.ipsets"
 	
 	local ipsets_file_for_client_node="$CLUSTER_CONF_DIR/$CLUSTER_NAME-client-rules.ipsets"
 	
@@ -2465,17 +2577,13 @@ update_client_user_whitelist() {
 
 
 
-# $1 : The cluster conf file
+# 	$1 : Name of cluster directory or Path of cluster configuration file.
 describe_cluster() {
-	if [ ! -f $1 ]; then
-		printf "Configuration file $1 not found.\nUsage: storm-cluster-linode.sh describe CLUSTER-CONF-FILE\n"
+
+	if ! load_cluster_conf "$1"; then
 		return 1
 	fi
 	
-	init_conf $1
-	if [ $? -eq 1 ]; then
-		return 1
-	fi
 
 	local stfile="$(status_file)"
 	# If the cluster does not exist, abort this operation.
@@ -2559,16 +2667,10 @@ describe_cluster() {
 
 
 
-# $1 : The cluster conf file
+# 	$1 : Name of cluster directory or Path of cluster configuration file.
 # $2... : Command to be run on all nodes of cluster.
 run_cmd() {
-	if [ ! -f $1 ]; then
-		printf "Configuration file $1 not found.\nUsage: storm-cluster-linode.sh run CLUSTER-CONF-FILE API-ENV-FILE cmd\n"
-		return 1
-	fi
-	
-	init_conf $1
-	if [ $? -eq 1 ]; then
+	if ! load_cluster_conf "$1"; then
 		return 1
 	fi
 
@@ -2610,17 +2712,12 @@ run_cmd() {
 
 
 
-# $1 : The cluster conf file
+# 	$1 : Name of cluster directory or Path of cluster configuration file.
 # $2 : Destination directory where files are copied on all nodes of cluster.
 # $3... : List of local files to upload
 copy_files() {
-	if [ ! -f $1 ]; then
-		printf "Configuration file $1 not found.\nUsage: storm-cluster-linode.sh cp CLUSTER-CONF-FILE API-ENV-FILE DESTINATION-DIR FILE1 FILE2...\n"
-		return 1
-	fi
-	
-	init_conf $1
-	if [ $? -eq 1 ]; then
+
+	if ! load_cluster_conf "$1"; then
 		return 1
 	fi
 
@@ -2662,14 +2759,25 @@ copy_files() {
 }
 
 
+# 	$1 : The API environment configuration file
+list_plans() {
+	
+	# Include the specified API environment variables.
+	if ! load_api_env_configuration "$1"; then
+		return 1
+	fi
+	
+	./linode_api.py 'plans' 'table'
+}
+
+
+
 
 # 	$1 : The API environment configuration file
 list_datacenters() {
 	
 	# Include the specified API environment variables.
-	. $1
-	validate_api_env_configuration
-	if [ $? -eq 1 ]; then
+	if ! load_api_env_configuration "$1"; then
 		return 1
 	fi
 
@@ -2684,9 +2792,7 @@ list_datacenters() {
 list_distributions() {
 	
 	# Include the specified API environment variables.
-	. $1
-	validate_api_env_configuration
-	if [ $? -eq 1 ]; then
+	if ! load_api_env_configuration "$1"; then
 		return 1
 	fi
 
@@ -2704,9 +2810,7 @@ list_distributions() {
 list_kernels() {
 	
 	# Include the specified API environment variables.
-	. $1
-	validate_api_env_configuration
-	if [ $? -eq 1 ]; then
+	if ! load_api_env_configuration "$1"; then
 		return 1
 	fi
 
@@ -2718,6 +2822,125 @@ list_kernels() {
 	
 	./linode_api.py "kernels" "$filter" 'table'
 }
+
+
+# $1 -> Image name
+validate_image_name() {
+	# - Shouldn't be empty.
+	# - Only alphabets, digits, hyphens, underscores
+	# - No length restriction, since image name isn't used as ipset name.
+	# - Should be unique. 
+
+	local invalid=0
+	if [ "$1" == "" ]; then
+		echo "Validation error: Image name should not be empty"
+		invalid=1
+		
+	else
+	
+		# Should contain only alphabets, digits, hyphens and underscores.
+		local strip_allowed=$(printf "$1"|tr -d "[=-=][_][:digit:][:alpha:]")
+		local len_notallowedchars=$(printf "$strip_allowed"|wc -m)
+		if [ $len_notallowedchars -gt 0 ]; then
+			echo "Validation error: Image name can have only alphabets, digits, hyphens and underscores. No whitespaces or special characters."
+			invalid=1
+		fi
+	fi
+
+	return $invalid
+}
+
+# $1 -> Image name, or absolute or relative path of image directory
+check_image_dir_exists() {
+	
+	# "dirname" lets us differentiate between a path with slashes, or just a simple
+	# name. If there are no slashes, dirname simply returns ".".
+	# "basename" extracts the last non slash component.
+	# "readlink -m" converts relative path to absolute path, regardless of any missing
+	#	path components.
+	# "readlink -e" converts relative path to absolute path, but if any missing
+	#	path components, it doesn't return the full path.
+	local image_full_path=$(readlink -m "$1")
+	IMAGE_NAME=$(basename "$image_full_path")
+	local image_parent=$(dirname "$image_full_path")
+	
+	if [ -d "$image_full_path" ]; then
+		return 0
+	fi
+	
+	return 1
+}
+
+
+# $1 -> Image name, or absolute or relative path of image directory, or
+#		absolute or relative path of image conf file in image directory.
+load_image_conf() {
+	
+	if [ -z "$1" ]; then
+		echo "Error: Provide an image name or image directory path or image configuration file path"
+		return 1
+	fi
+
+	# readlink -m converts a name to an absolute path, even if some path components 
+	# are non existent. 
+	# A simple name like "stormimage1" is treated like a relative path and becomes <ABSOLUTE_CURRENT_DIR>/stormimage1
+	# Similarly other relative paths with "./" or "../"
+	local param_full_path=$(readlink -m "$1")
+	
+	if [ -d "$param_full_path" ]; then
+		# Check that there is a $image_name.conf in the directory and it is
+		# a proper image conf.
+		IMAGE_NAME=$(basename "$param_full_path")
+		IMAGE_CONF_FILE="$param_full_path/$IMAGE_NAME.conf"
+		IMAGE_CONF_DIR="$(dirname $IMAGE_CONF_FILE)"
+		
+		if [ ! -f "$IMAGE_CONF_FILE" ]; then
+			echo "Error: '$1' does not seem to be a valid image name or image directory. Could not find image configuration file '$IMAGE_CONF_FILE'"
+			return 1
+		fi
+		
+	elif [ -f "$param_full_path" ]; then
+		# The given file may be any file at all, but what we want is a conf file with the correct image name.
+		IMAGE_NAME=$(basename $(dirname "$param_full_path"))
+		IMAGE_CONF_DIR=$(dirname "$param_full_path")
+		IMAGE_CONF_FILE="$IMAGE_CONF_DIR/$IMAGE_NAME.conf"
+		
+		local param_basename=$(basename "$param_full_path")
+		if [ "$param_basename" != "$IMAGE_NAME.conf" ]; then
+			echo "Error: '$1' does not seem to be a valid image configuration filename. Expected image configuration filename '$IMAGE_CONF_FILE'"
+			return 1
+		fi 
+		
+		if [ ! -f "$IMAGE_CONF_FILE" ]; then
+			echo "Error: Image configuration file '$IMAGE_CONF_FILE' does not exist."
+			return 1
+		fi
+		
+	else
+		echo "Error: '$param_full_path' does not exist."
+		return 1
+	fi
+		
+	# Absolute paths of this script's directory, and the image conf file's directory.
+	SCRIPT_DIR="$(pwd)"
+	
+	echo "SCRIPT_DIR=$SCRIPT_DIR"
+	echo "IMAGE_NAME=$IMAGE_NAME"
+	echo "IMAGE_CONF_DIR=$IMAGE_CONF_DIR"
+	echo "IMAGE_CONF_FILE=$IMAGE_CONF_FILE"
+
+	# Load the conf file as an environment variables file.
+	source "$IMAGE_CONF_FILE"
+	
+	# Check if it's a proper conf file
+	if ! validate_image_configuration; then
+		return 1
+	fi
+	
+	return 0
+}
+
+
 
 
 # Caller is expected to have included the image configuration file in environment
@@ -2811,33 +3034,69 @@ validate_image_configuration() {
 }
 
 
+# $1 -> Cluster name, or absolute or relative path of cluster directory
+check_cluster_dir_exists() {
+	
+	# "dirname" lets us differentiate between a path with slashes, or just a simple
+	# name. If there are no slashes, dirname simply returns ".".
+	# "basename" extracts the last non slash component.
+	# "readlink -m" converts relative path to absolute path, regardless of any missing
+	#	path components.
+	# "readlink -e" converts relative path to absolute path, but if any missing
+	#	path components, it doesn't return the full path.
+	local cluster_full_path=$(readlink -m "$1")
+	CLUSTER_NAME=$(basename "$cluster_full_path")
+	local cluster_parent=$(dirname "$cluster_full_path")
+	
+	if [ -d "$cluster_full_path" ]; then
+		return 0
+	fi
+	
+	return 1
+}
+
+
+# $1 -> Cluster name
+validate_cluster_name() {
+	# - Shouldn't be empty.
+	# - Only alphabets, digits, hyphens, underscores
+	# - 25 character restriction, since cluster name is part of ipset names.
+	# - Should be unique. 
+
+	local invalid=0
+	if [ "$1" == "" ]; then
+		echo "Validation error: Cluster name should not be empty"
+		invalid=1
+		
+	else
+	
+		# Should contain only alphabets, digits, hyphens and underscores.
+		local strip_allowed=$(printf "$1"|tr -d "[=-=][_][:digit:][:alpha:]")
+		local len_notallowedchars=$(printf "$strip_allowed"|wc -m)
+		if [ $len_notallowedchars -gt 0 ]; then
+			echo "Validation error: Cluster name can have only alphabets, digits, hyphens and underscores. No whitespaces or special characters."
+			invalid=1
+		fi
+		
+		# Should be maximum 25 characters at most.
+		local len=$(printf "$1"|wc -m)
+		if [ $len -gt 25 ]; then
+			echo "Validation error: Cluster name cannot have more than 25 characters."
+			invalid=1
+		fi
+
+	fi
+
+	return $invalid
+}
+
+
 
 # Caller is expected to have included the cluster configuration file in environment
 # prior to calling this.
 validate_cluster_configuration() {
 	local invalid=0
 
-	# Cluster name checks:
-	# Cluster name should not be undefined.
-	if [ "$CLUSTER_NAME" == "" ]; then
-		echo "Validation error: Invalid cluster configuration - CLUSTER_NAME should have a non-empty value"
-		invalid=1
-	fi
-	
-	# Should contain only alphabets, digits, hyphens and underscores.
-	local strip_allowed=$(printf "$CLUSTER_NAME"|tr -d "[=-=][_][:digit:][:alpha:]")
-	local len_notallowedchars=$(printf "$strip_allowed"|wc -m)
-	if [ $len_notallowedchars -gt 0 ]; then
-		echo "Validation error: Invalid cluster configuration - CLUSTER_NAME can have only alphabets, digits, hyphens and underscores. No whitespaces or special characters."
-		invalid=1
-	fi
-	
-	# Should be maximum 25 characters at most.
-	local len=$(printf "$CLUSTER_NAME"|wc -m)
-	if [ $len -gt 25 ]; then
-		echo "Validation error: Invalid cluster configuration - CLUSTER_NAME cannot have more than 25 characters."
-		invalid=1
-	fi
 	
 	if [ -z "$STORM_IMAGE_CONF" ]; then
 		echo "Validation error: STORM_IMAGE_CONF should be the path of a image configuration file"
@@ -2872,7 +3131,15 @@ validate_cluster_configuration() {
 
 # Caller is expected to have included the cluster configuration file in environment
 # prior to calling this.
-validate_api_env_configuration() {
+load_api_env_configuration() {
+	
+	if [ -z "$1" ]; then
+		echo "Error: Missing API configuration file"
+		return 1
+	fi
+	
+	source "$1"
+	
 	local invalid=0
 	
 	if [ -z "$LINODE_KEY" ]; then
@@ -3044,8 +3311,7 @@ status_file() {
 
 
 image_status_file() {
-	local image_name=$(basename "$IMAGE_CONF_FILE"|sed -r 's/.conf//')
-	echo "$IMAGE_CONF_DIR/$image_name.info"
+	echo "$IMAGE_CONF_DIR/$IMAGE_NAME.info"
 }
 
 
@@ -3161,75 +3427,79 @@ ssh_command() {
 
 case $1 in
 	new-image-conf)
-	create_new_image_conf $2
+	create_new_image_conf "$2"
 	;;
 
 	create-image)
-	create_storm_image $2 $3
+	create_storm_image "$2" "$3"
 	;;
 	
 	delete-image)
-	delete_storm_image $2 $3
+	delete_storm_image "$2" "$3"
 	;;
 
 	new-cluster-conf)
-	create_new_cluster_conf $2
+	create_new_cluster_conf "$2"
 	;;
 
 	create)
-	create_cluster $2 $3
+	create_cluster "$2" "$3"
 	;;
 
 	start)
-	start_cluster $2 $3
+	start_cluster "$2" "$3"
 	;;
 
 	shutdown|stop)
-	stop_cluster $2 $3
+	stop_cluster "$2" "$3"
 	;;
 
 	destroy)
-	destroy_cluster $2 $3
+	destroy_cluster "$2" "$3"
 	;;
 
 	add-nodes)
-	add_nodes $2 $3 "$4"
+	add_nodes "$2" "$3" "$4"
 	;;
 	
 	update-storm-yaml)
-	update_storm_yaml $2
+	update_storm_yaml "$2"
 	;;
 	
 	update-firewall)
-	update_firewall $2
+	update_firewall "$2"
 	;;
 	
 	update-user-whitelist)
-	update_client_user_whitelist $2
+	update_client_user_whitelist "$2"
 	;;
 	
 	describe)
-	describe_cluster $2
+	describe_cluster "$2"
 	;;
 	
 	run)
-	run_cmd $2 "${@:3}"
+	run_cmd "$2" "${@:3}"
 	;;
 	
 	cp)
-	copy_files $2 "$3" "${@:4}"
+	copy_files "$2" "$3" "${@:4}"
 	;;
 
+	plans)
+	list_plans "$2"
+	;;
+	
 	datacenters)
-	list_datacenters $2
+	list_datacenters "$2"
 	;;
 
 	distributions)
-	list_distributions $2 $3
+	list_distributions "$2" "$3"
 	;;
 	
 	kernels)
-	list_kernels $2 $3
+	list_kernels "$2" "$3"
 	;;
 
 	*)
