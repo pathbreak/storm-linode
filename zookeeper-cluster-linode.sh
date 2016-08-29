@@ -81,7 +81,7 @@ load_cluster_conf() {
 	fi
 	
 	if ! load_image_conf "$zk_image_conf"; then
-		echo "Error: Change value of ZK_IMAGE_CONF to a valid Zookeeper image name or image directory or image configuration file path."
+		echo "Error: Change value of ZK_IMAGE_CONF to an existing Zookeeper image directory or image configuration file path."
 		return 1
 	fi
 	
@@ -152,11 +152,38 @@ create_zk_image() {
 		return 1
 	fi
 	
+	local linout linerr linret
+
+	# There are limits on both number of images (max 3) and total size across
+	# images (10240MB). If these limits are reached or close to breaching, warn user
+	# and prevent disk imaging.
+	echo "Image prechecks"
+	
+	linode_api linout linerr linret "imagestats"
+	if [ $linret -eq 1 ]; then
+		echo "Failed to get image statistics. Continuing, but there is a chance image creation may fail due to image count and disk size limits. Error:$linerr"
+	else
+		local num_images=$(echo $linout|cut -d ',' -f1)
+		local total_image_size=$(echo $linout|cut -d ',' -f2)
+		
+		if [ $num_images -eq 3 ]; then
+			printf "Error: Cannot create image because account limit of 3 images have already been created.\n"
+			printf "Please delete an image using 'delete-image' or from 'Linode Manager' before retrying.\n"
+			return 1
+		fi
+		
+		if [ $total_image_size -ge 9000 ]; then
+			printf "Warning: Total size of existing images $total_image_size MB is close to maximum limit of 10240 MB.\n"
+			printf "There's a chance this image creation may fail.\n"
+			printf "If it does, delete an existing image and try again.\n"
+		fi
+	fi
+	
+
 	create_image_status_file
 
 	# Create temporary linode of lowest cost plan in specified datacenter.
 	echo "Creating temporary linode"
-	local linout linerr linret
 	linode_api linout linerr linret "create-node" 1 "$DATACENTER_FOR_IMAGE"
 	if [ $linret -eq 1 ]; then
 		echo "Failed to create temporary linode. Error:$linerr"
@@ -641,13 +668,29 @@ create_new_nodes() {
 	local dc_id=$linout
 	echo "Datacenter ID=$dc_id"
 	
-	# Get the name of image from the image conf being used by this cluster.
-	linode_api linout linerr linret "image-id" "$LABEL_FOR_IMAGE"
-	if [ $linret -eq 1 ]; then
-		echo "Failed to find image. Error:$linerr"
+	# Get the image id from the image info file. If there is no image info file,
+	# then try to find using API. 
+	local img_stfile="$(image_status_file)"
+	local image_id
+	if [ -f "$img_stfile" ]; then
+		image_id=$(get_section $img_stfile "image")
+	fi
+	
+	if [ -z "$image_id" ]; then
+		echo "Unable to get image ID from image info file. Searching for image using label..."
+		linode_api linout linerr linret "image-id" "$LABEL_FOR_IMAGE"
+		if [ $linret -eq 1 ]; then
+			echo "Failed to find image. Error:$linerr"
+			return 1
+		fi
+		image_id=$(echo $linout|cut -d ',' -f1)
+	fi
+	
+	if [ -z "$image_id" ]; then
+		echo "Failed to find image."
 		return 1
 	fi
-	local image_id=$(echo $linout|cut -d ',' -f1)
+	
 	echo "Image ID=$image_id"
 	
 	# Get the kernel ID.
@@ -2265,10 +2308,11 @@ load_image_conf() {
 	source "$IMAGE_CONF_FILE"
 	
 	# Check if it's a proper conf file
-	validate_image_configuration
-	if [ $? -eq 1 ]; then
+	if ! validate_image_configuration; then
 		return 1
 	fi
+	
+	return 0
 }
 
 

@@ -549,6 +549,18 @@ def list_diskimages():
 	print json.dumps(data, indent=4, separators=(',',':'))
 
 
+def image_stats():
+	# https://www.linode.com/api/image/image.list
+	response = linode_request('image.list', None)
+	images = response['DATA']
+	image_count = len(images)
+	total_image_size = 0
+	for i in images:
+		total_image_size += i['MINSIZE']
+	return image_count,total_image_size
+
+
+
 # This returns the image id and image label given its label or just the ID itself.
 def find_image(image):
 	images = linode_request('image.list', None)['DATA']
@@ -1084,6 +1096,12 @@ elif (cmd == 'create-disk-from-image'):
 
 elif (cmd == 'images'):
 	list_diskimages()
+
+elif (cmd == 'imagestats'):
+	image_count, total_size = image_stats()
+	print "%d,%d" % (image_count, total_size)
+	
+	sys.exit(0)
 
 elif (cmd == 'image-id'): 
 	# Checks the input argument and returns the numeric image ID
