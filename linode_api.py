@@ -590,6 +590,25 @@ def delete_image(image_id):
 	return (True, image_id)
 	
 
+def delete_all_images():
+	images = linode_request('image.list', None)['DATA']
+	
+	deleted_images = []
+	all_errors = []
+	
+	for img in images:
+		img_id = img['IMAGEID']
+		resp = linode_request('image.delete', {'ImageID' : img_id})
+		
+		iserr, errors = is_error(resp)
+		if iserr:
+			all_errors.append(errors)
+		else:	
+			deleted_images.append(img_id)
+	
+	return (deleted_images, all_errors)
+
+
 def create_disk_from_image(linode_id, image_id, label, disk_size, root_password, root_ssh_key_file):
 	# Note: This assumes the image_id is valid.
 	
@@ -1127,6 +1146,17 @@ elif (cmd == 'delete-image'):
 	success, data = delete_image(image_id)
 	if not success:
 		print >>sys.stderr, data
+		sys.exit(1)
+	
+	sys.exit(0)
+	
+elif (cmd == 'delete-all-images'): 
+	deleted_images, all_errors = delete_all_images()
+	
+	print ','.join([str(id) for id in deleted_images])
+	
+	if all_errors:
+		print >>sys.stderr, all_errors
 		sys.exit(1)
 	
 	sys.exit(0)
