@@ -40,7 +40,7 @@ See [Generating an API key](https://www.linode.com/docs/platform/api/api-key).
 
         git clone "https://github.com/pathbreak/storm-linode"
         cd storm-linode
-        git checkout $(git tag -l "release*" | head -n1)
+        git checkout $(git describe $(git rev-list --tags='release*' --max-count=1))
 
         chmod +x *.sh *.py
         sudo apt-get install python2.7 curl
