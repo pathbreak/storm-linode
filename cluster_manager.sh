@@ -260,6 +260,16 @@ create_cluster_manager_linode() {
 # $1 -> (Optional) The SHA1 or short SHA1 hash of the git revision to download. If not specified,
 #		it downloads the latest release tagged version.
 setup_cluster_manager() {
+	
+	# Disable IPv6 on Cluster Manager because
+	# apt-get seems to hang on security.ubuntu.com domains when it's enabled.
+	echo "Disabling IPv6"
+
+	echo 'net.ipv6.conf.all.disable_ipv6 = 1' >> /etc/sysctl.conf
+	echo 'net.ipv6.conf.default.disable_ipv6 = 1' >> /etc/sysctl.conf
+	echo 'net.ipv6.conf.lo.disable_ipv6 = 1' >> /etc/sysctl.conf
+	sysctl -p
+	
 	apt-get -y update
 	#apt-get -y upgrade
 	

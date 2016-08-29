@@ -532,6 +532,9 @@ create_cluster() {
 		return 1
 	fi
 
+	# Wait for sometime after nodes have booted up for SSH daemon to come up.
+	sleep 15
+
 	# Since nodes created from an image retain the image's host keys, they should
 	# be changed to unique ones before doing anything else.
 	change_hostkeys $CLUSTER_NAME
@@ -633,6 +636,9 @@ start_cluster() {
 		./zookeeper-cluster-linode.sh start "$ZK_CLUSTER_CONF_FILE" "$2"
 		
 		start_nodes $CLUSTER_NAME
+
+		# Wait for sometime after nodes have booted up for SSH daemon to come up.
+		sleep 15
 		
 		# If nodes were added when cluster was stopped, we need all nodes
 		# to know about all other nodes.
@@ -1591,6 +1597,14 @@ setup_users_and_authentication_for_image() {
 # $2 : SSH username for node
 install_software_on_node() {
 
+	# Disable IPv6 both to keep the firewall configuration tight and because
+	# apt-get seems to hang on security.ubuntu.com domains when it's enabled.
+	echo "Disabling IPv6"
+
+	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY \
+		"sh -c \"echo 'net.ipv6.conf.all.disable_ipv6 = 1' >> /etc/sysctl.conf;echo 'net.ipv6.conf.default.disable_ipv6 = 1' >> /etc/sysctl.conf;echo 'net.ipv6.conf.lo.disable_ipv6 = 1' >> /etc/sysctl.conf\""
+	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sysctl -p
+
 	# Update repo information before installing.
 	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY apt-get -y update
 	
@@ -1692,14 +1706,6 @@ install_software_on_node() {
 	         service netfilter-persistent start;
 	     fi\""
 
-	
-
-	# Disable IPv6 to keep the firewall configuration tight.
-	echo "Disabling IPv6"
-
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY \
-		"sh -c \"echo 'net.ipv6.conf.all.disable_ipv6 = 1' >> /etc/sysctl.conf;echo 'net.ipv6.conf.default.disable_ipv6 = 1' >> /etc/sysctl.conf;echo 'net.ipv6.conf.lo.disable_ipv6 = 1' >> /etc/sysctl.conf\""
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sysctl -p
 }
 
 
@@ -2152,6 +2158,9 @@ add_nodes() {
 	fi
 
 	start_nodes $CLUSTER_NAME ":supervisor:new"
+
+	# Wait for sometime after nodes have booted up for SSH daemon to come up.
+	sleep 15
 	
 	# Since nodes created from an image retain the image's host keys, they should
 	# be changed to unique ones before doing anything else.

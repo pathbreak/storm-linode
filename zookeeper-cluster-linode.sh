@@ -443,6 +443,9 @@ create_cluster() {
 	create_new_nodes $CLUSTER_NAME
 
 	start_nodes $CLUSTER_NAME
+
+	# Wait for sometime after nodes have booted up for SSH daemon to come up.
+	sleep 15
 	
 	# Since nodes created from an image retain the image's host keys, they should
 	# be changed to unique ones before doing anything else.
@@ -542,6 +545,9 @@ start_cluster() {
 		# and distribute hosts file.
 		start_nodes $CLUSTER_NAME
 		
+		# Wait for sometime after nodes have booted up for SSH daemon to come up.
+		sleep 15
+		
 		# The cluster zoo.cfg may have been changed by admin.
 		# If so, it should  be distributed.
 		local conf_status=$(get_conf_status)
@@ -628,6 +634,8 @@ start_nodes() {
 		boot_jobs="$boot_jobs $boot_job_id:$node"
 	done
 	
+	echo "Waiting for nodes to boot"
+	
 	for job in $boot_jobs
 	do
 		job_id=$(echo $job|cut -d':' -f1)
@@ -647,6 +655,8 @@ start_nodes() {
 			return 1
 		fi
 	done
+	
+	echo "All nodes booted"
 	
 	return 0
 }
@@ -1299,6 +1309,14 @@ setup_users_and_authentication_for_image() {
 # $2 : SSH username for node
 install_software_on_node() {
 	
+	# Disable IPv6 both to keep the firewall configuration tight and because
+	# apt-get seems to hang on security.ubuntu.com domains when it's enabled.
+	echo "Disabling IPv6"
+
+	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY \
+		"sh -c \"echo 'net.ipv6.conf.all.disable_ipv6 = 1' >> /etc/sysctl.conf;echo 'net.ipv6.conf.default.disable_ipv6 = 1' >> /etc/sysctl.conf;echo 'net.ipv6.conf.lo.disable_ipv6 = 1' >> /etc/sysctl.conf\""
+	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sysctl -p
+	
 	# Update repo information before installing.
 	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY apt-get -y update
 	
@@ -1387,12 +1405,6 @@ install_software_on_node() {
 	     fi\""
 
 	
-	# Disable IPv6 to keep the firewall configuration tight.
-	echo "Disabling IPv6"
-
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY \
-		"sh -c \"echo 'net.ipv6.conf.all.disable_ipv6 = 1' >> /etc/sysctl.conf;echo 'net.ipv6.conf.default.disable_ipv6 = 1' >> /etc/sysctl.conf;echo 'net.ipv6.conf.lo.disable_ipv6 = 1' >> /etc/sysctl.conf\""
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY sysctl -p
 }
 
 
