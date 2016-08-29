@@ -24,9 +24,15 @@ A set of scripts to create [Apache Storm clusters](http://storm.apache.org/) and
 
 +   A workstation running Ubuntu 14.04 LTS or Debian 8
 
+
+
+
 # Step 1 - Get a Linode API key
 
 See [Generating an API key](https://www.linode.com/docs/platform/api/api-key).
+
+
+
 
 # Step 2 - Setup a Cluster Manager Linode
 
@@ -75,6 +81,10 @@ See [Generating an API key](https://www.linode.com/docs/platform/api/api-key).
     Set `CLUSTER_MANAGER_NODE_PASSWORD` to *clustermgr* user's password.
     Save and close the editor.
     
+
+
+
+
 # Step 3 - Create a Zookeeper Image
 
 1.  Log in to the Cluster Manager as **clustermgr** using the *clustermgr* private key:
@@ -92,7 +102,11 @@ See [Generating an API key](https://www.linode.com/docs/platform/api/api-key).
 
 3.  Create the image:
 
-        ./zookeeper-cluster-linode.sh create-image zk-image1/zk-image1.conf api_env_linode.conf
+        ./zookeeper-cluster-linode.sh create-image zk-image1 api_env_linode.conf
+
+
+
+
 
 # Step 4 - Create a Zookeeper Cluster
 
@@ -109,7 +123,7 @@ See [Generating an API key](https://www.linode.com/docs/platform/api/api-key).
     
 2.  Create the cluster:
 
-        ./zookeeper-cluster-linode.sh create zk-cluster1/zk-cluster1.conf  api_env_linode.conf
+        ./zookeeper-cluster-linode.sh create zk-cluster1  api_env_linode.conf
 
 # Step 5 - Create a Storm Image
 
@@ -128,7 +142,10 @@ See [Generating an API key](https://www.linode.com/docs/platform/api/api-key).
 
 3.  Create the image:
 
-        ./storm-cluster-linode.sh create-image  storm-image1/storm-image1.conf api_env_linode.conf
+        ./storm-cluster-linode.sh create-image  storm-image1 api_env_linode.conf
+
+
+
 
 # Step 6 - Create a Storm Cluster
 
@@ -145,7 +162,10 @@ See [Generating an API key](https://www.linode.com/docs/platform/api/api-key).
     
 2.  Create the cluster:
 
-        ./storm-cluster-linode.sh create storm-cluster1/storm-cluster1.conf  api_env_linode.conf
+        ./storm-cluster-linode.sh create storm-cluster1  api_env_linode.conf
+
+
+
 
 # Step 7 - Start a Storm Cluster
 
@@ -153,8 +173,11 @@ Log in to the Cluster Manager as **clustermgr** using the *clustermgr* private k
 
     ssh -i ~/.ssh/clustermgr clustermgr@PUBLIC-IP-OF-CLUSTER-MANAGER-LINODE
     cd storm-linode
-    ./storm-cluster-linode.sh start storm-cluster1/storm-cluster1.conf  api_env_linode.conf
-    
+    ./storm-cluster-linode.sh start storm-cluster1  api_env_linode.conf
+
+
+
+
 # Monitor a Storm Cluster
 
 Only whitelisted IP addresses can monitor a Storm Cluster using its Storm UI web application.
@@ -176,9 +199,12 @@ Only whitelisted IP addresses can monitor a Storm Cluster using its Storm UI web
 
 3.  Run this command to update firewall rules across all nodes of the cluster:
 
-        ./storm-cluster-linode.sh update-user-whitelist storm-cluster1/storm-cluster1.conf    
+        ./storm-cluster-linode.sh update-user-whitelist storm-cluster1
         
 4.  Open Storm UI web app at `http://public-IP-of-client-node` from any of these whitelisted machines.
+
+
+
 
 # Test a Storm cluster
 
@@ -186,7 +212,7 @@ Only whitelisted IP addresses can monitor a Storm Cluster using its Storm UI web
 
         ssh -i ~/.ssh/clustermgr clustermgr@PUBLIC-IP-OF-CLUSTER-MANAGER-LINODE
         cd storm-linode
-        ./storm-cluster-linode.sh describe storm-cluster1/storm-cluster1.conf
+        ./storm-cluster-linode.sh describe storm-cluster1
     
     Note down the private IP address of client node.
     
@@ -198,10 +224,16 @@ Only whitelisted IP addresses can monitor a Storm Cluster using its Storm UI web
         
 3.  Open Storm UI web app at `http://public-IP-of-client-node` from one of the whitelisted machines, and verify that wordcount topology is being executed.
 
+
+
+
 # Start a new topology
 
 Develop your topology and package it as a JAR.
 Then follow the same steps as [Test a Storm cluster](#test-a-storm-cluster) but submit your JAR and your topology class instead of wordcount.
+
+
+
 
 # Expand a Storm cluster
 
@@ -212,9 +244,12 @@ Then follow the same steps as [Test a Storm cluster](#test-a-storm-cluster) but 
         
 2.  Expand nodes by specifying number of new nodes and their plans in `plan:count plan:count....` syntax:
         
-        ./storm-cluster-linode.sh add-nodes storm-cluster1/storm-cluster1.conf  api_env_linode.conf "2GB:1 4GB:2"
+        ./storm-cluster-linode.sh add-nodes storm-cluster1  api_env_linode.conf "2GB:1 4GB:2"
         
 3.  Rebalance topologies after adding to distribute tasks to new nodes.
+
+
+
 
 # Describe a Storm cluster
 
@@ -222,7 +257,7 @@ For user with *clustermgr* authorization, log in to the Cluster Manager Linode a
 
         ssh -i ~/.ssh/clustermgr clustermgr@PUBLIC-IP-OF-CLUSTER-MANAGER-LINODE
         cd storm-linode
-        ./storm-cluster-linode.sh describe <target-cluster-conf-file>
+        ./storm-cluster-linode.sh describe <target-cluster-name>
 
 For user with *clustermgrguest* authorization, log in to the Cluster Manager Linode as *clustermgrguest* using *clustermgrguest* authorized private key:
 
@@ -230,14 +265,20 @@ For user with *clustermgrguest* authorization, log in to the Cluster Manager Lin
         cd storm-linode
         ./cluster_info.sh list
         ./cluster_info.sh info <target_cluster>
-        
+
+
+
+
 # Stop a Storm cluster
 
 Log in to the Cluster Manager as **clustermgr** using the *clustermgr* private key:
 
         ssh -i ~/.ssh/clustermgr clustermgr@PUBLIC-IP-OF-CLUSTER-MANAGER-LINODE
         cd storm-linode
-        ./storm-cluster-linode.sh stop storm-cluster1/storm-cluster1.conf api_env_linode.conf
+        ./storm-cluster-linode.sh stop storm-cluster1 api_env_linode.conf
+
+
+
 
 # Destroy a Storm cluster
 
@@ -245,7 +286,10 @@ Log in to the Cluster Manager as **clustermgr** using the *clustermgr* private k
 
         ssh -i ~/.ssh/clustermgr clustermgr@PUBLIC-IP-OF-CLUSTER-MANAGER-LINODE
         cd storm-linode
-        ./storm-cluster-linode.sh destroy storm-cluster1/storm-cluster1.conf api_env_linode.conf
+        ./storm-cluster-linode.sh destroy storm-cluster1 api_env_linode.conf
+
+
+
 
 # Run a command on all nodes of Storm cluster
         
@@ -253,9 +297,12 @@ Log in to the Cluster Manager as **clustermgr** using the *clustermgr* private k
 
         ssh -i ~/.ssh/clustermgr clustermgr@PUBLIC-IP-OF-CLUSTER-MANAGER-LINODE
         cd storm-linode
-        ./storm-cluster-linode.sh run storm-cluster1/storm-cluster1.conf "<cmds>"
+        ./storm-cluster-linode.sh run storm-cluster1 "<cmds>"
 
 The commands are run as root user on each node.
+
+
+
 
 # Copy file(s) to all nodes of Storm cluster
         
@@ -263,9 +310,12 @@ Log in to the Cluster Manager as **clustermgr** using the *clustermgr* private k
 
         ssh -i ~/.ssh/clustermgr clustermgr@PUBLIC-IP-OF-CLUSTER-MANAGER-LINODE
         cd storm-linode
-        ./storm-cluster-linode.sh cp storm-cluster1/storm-cluster1.conf "." "<files>"
+        ./storm-cluster-linode.sh cp storm-cluster1 "." "<files>"
 
 The files are copied as root user on each node.
+
+
+
 
 # Delete a Storm image
 
@@ -273,7 +323,10 @@ Log in to the Cluster Manager as **clustermgr** using the *clustermgr* private k
 
         ssh -i ~/.ssh/clustermgr clustermgr@PUBLIC-IP-OF-CLUSTER-MANAGER-LINODE
         cd storm-linode
-        ./storm-cluster-linode.sh delete-image storm-image1/storm-image1.conf api_env_linode.conf
+        ./storm-cluster-linode.sh delete-image storm-image1 api_env_linode.conf
+
+
+
 
 # Describe a Zookeeper cluster
 
@@ -281,7 +334,7 @@ For user with *clustermgr* authorization, log in to the Cluster Manager Linode a
 
         ssh -i ~/.ssh/clustermgr clustermgr@PUBLIC-IP-OF-CLUSTER-MANAGER-LINODE
         cd storm-linode
-        ./zookeepercluster-linode.sh describe <target-cluster-conf-file>
+        ./zookeepercluster-linode.sh describe <target-cluster-name>
 
 For user with *clustermgrguest* authorization, log in to the Cluster Manager Linode as *clustermgrguest* using *clustermgrguest* authorized private key:
 
@@ -290,13 +343,19 @@ For user with *clustermgrguest* authorization, log in to the Cluster Manager Lin
         ./cluster_info.sh list
         ./cluster_info.sh info <target_cluster>
         
+        
+        
+        
 # Stop a Zookeeper cluster
 
 Log in to the Cluster Manager as **clustermgr** using the *clustermgr* private key:
 
         ssh -i ~/.ssh/clustermgr clustermgr@PUBLIC-IP-OF-CLUSTER-MANAGER-LINODE
         cd storm-linode
-        ./zookeeper-cluster-linode.sh stop zk-cluster1/zk-cluster1.conf api_env_linode.conf
+        ./zookeeper-cluster-linode.sh stop zk-cluster1 api_env_linode.conf
+
+
+
 
 # Destroy a Zookeeper cluster
 
@@ -304,7 +363,10 @@ Log in to the Cluster Manager as **clustermgr** using the *clustermgr* private k
 
         ssh -i ~/.ssh/clustermgr clustermgr@PUBLIC-IP-OF-CLUSTER-MANAGER-LINODE
         cd storm-linode
-        ./zookeeper-cluster-linode.sh destroy zk-cluster1/zk-cluster1.conf api_env_linode.conf
+        ./zookeeper-cluster-linode.sh destroy zk-cluster1 api_env_linode.conf
+
+
+
 
 # Run a command on all nodes of Zookeeper cluster
         
@@ -312,9 +374,12 @@ Log in to the Cluster Manager as **clustermgr** using the *clustermgr* private k
 
         ssh -i ~/.ssh/clustermgr clustermgr@PUBLIC-IP-OF-CLUSTER-MANAGER-LINODE
         cd storm-linode
-        ./zookeeper-cluster-linode.sh run zk-cluster1/zk-cluster1.conf  "<cmds>"
+        ./zookeeper-cluster-linode.sh run zk-cluster1  "<cmds>"
 
 The commands are run as root user on each node.
+
+
+
 
 # Copy file(s) to all nodes of Zookeeper cluster
         
@@ -322,9 +387,13 @@ Log in to the Cluster Manager as **clustermgr** using the *clustermgr* private k
 
         ssh -i ~/.ssh/clustermgr clustermgr@PUBLIC-IP-OF-CLUSTER-MANAGER-LINODE
         cd storm-linode
-        ./zookeeper-cluster-linode.sh cp zk-cluster1/zk-cluster1.conf  "." "<files>"
+        ./zookeeper-cluster-linode.sh cp zk-cluster1  "." "<files>"
 
 The files are copied as root user on each node.
+
+
+
+
 
 # Delete a Zookeeper image
 
@@ -332,7 +401,10 @@ Log in to the Cluster Manager as **clustermgr** using the *clustermgr* private k
 
         ssh -i ~/.ssh/clustermgr clustermgr@PUBLIC-IP-OF-CLUSTER-MANAGER-LINODE
         cd storm-linode
-        ./zookeeper-cluster-linode.sh delete-image zk-image1/zk-image1.conf api_env_linode.conf
+        ./zookeeper-cluster-linode.sh delete-image zk-image1 api_env_linode.conf
+
+
+
 
 # License
 
