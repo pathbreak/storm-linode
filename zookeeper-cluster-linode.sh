@@ -166,14 +166,16 @@ create_zk_image() {
 		local num_images=$(echo $linout|cut -d ',' -f1)
 		local total_image_size=$(echo $linout|cut -d ',' -f2)
 		
-		if [ $num_images -eq 3 ]; then
-			printf "Error: Cannot create image because account limit of 3 images have already been created.\n"
-			printf "Please delete an image using 'delete-image' or from 'Linode Manager' before retrying.\n"
-			return 1
-		fi
+		# The number of image limit does not seem to be consistent.
+		# Disabling the check.
+		#if [ $num_images -eq 3 ]; then
+		#	printf "Error: Cannot create image because account limit of 3 images have already been created.\n"
+		#	printf "Please delete an image using 'delete-image' or from 'Linode Manager' before retrying.\n"
+		#	return 1
+		#fi
 		
 		if [ $total_image_size -ge 9000 ]; then
-			printf "Warning: Total size of existing images $total_image_size MB is close to maximum limit of 10240 MB.\n"
+			printf "Warning: Total size of existing images $total_image_size MB is close to limit of 10240 MB.\n"
 			printf "There's a chance this image creation may fail.\n"
 			printf "If it does, delete an existing image and try again.\n"
 		fi
