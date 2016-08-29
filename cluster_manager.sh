@@ -293,7 +293,7 @@ setup_cluster_manager() {
 	cd storm-linode
 	if [ "x$1" == "x" ]; then
 		git fetch --tags
-		latest_release_tag=$(git tag -l "release*" | head -n1)
+		latest_release_tag=$(git describe $(git rev-list --tags='release*' --max-count=1))
 		echo "Activating latest release version of the software : $latestTag"
  		git checkout $latestTag
  	else
