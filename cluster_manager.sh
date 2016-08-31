@@ -254,7 +254,7 @@ create_cluster_manager_linode() {
 	cd ..
 	rm -rf storm-linode
 	
-	echo "Cluster Manager is ready. Log in using 'SSH_AUTH_SOCK=0 ssh -i ~/.ssh/clustermgr clustermgr@$public_ip'"
+	echo "Cluster Manager is ready. IP address is $public_ip."
 }
 
 # $1 -> (Optional) The SHA1 or short SHA1 hash of the git revision to download. If not specified,
