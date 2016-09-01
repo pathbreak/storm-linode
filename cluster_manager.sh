@@ -273,7 +273,7 @@ setup_cluster_manager() {
 	apt-get -y update
 	#apt-get -y upgrade
 	
-	apt-get -y install git python2.7 ssh wget sed tmux
+	apt-get -y install git python python2.7 ssh wget sed tmux
 	
 	# Create the 'clustermgr' user for running scripts.
 	# It should be part of sudo because script should modify /etc/hosts of cluster manager node

@@ -1619,13 +1619,13 @@ install_software_on_node() {
 
 
 
-	echo "Installing OpenJDK JRE 7 on $1..."
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY apt-get -y install "openjdk-7-jre-headless"
+	echo "Installing OpenJDK JRE on $1..."
+	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY apt-get -y install "default-jre-headless"
 
 
 
 	echo "Installing Python 2.7 on $1..."
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY apt-get -y install "python2.7"
+	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY apt-get -y install "python python2.7"
 
 
 
@@ -1657,7 +1657,8 @@ install_software_on_node() {
 	# From https://github.com/Supervisor/supervisor/blob/master/supervisor/supervisorctl.py, supervisor update 
 	# first does the same thing as a reread and then restarts changed programs. So despite what many discussions 
 	# say, there's no need to first reread and then update.
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY "supervisorctl update"
+	# In Ubuntu 16, supervisor service should first be started.
+	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY "service supervisor start; sleep 10; supervisorctl update"
 	
 
 	# Install packages required for iptables firewall configuration.
@@ -1890,18 +1891,18 @@ start_storm() {
 			
 			echo "Starting nimbus service on $node [$target_ip]..."
 			nimbus_ipaddr=$target_ip
-			ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "supervisorctl start storm-nimbus"
+			ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "service supervisor start; sleep 10; supervisorctl start storm-nimbus"
 	
 		elif [ "$role" == "supervisor" ]; then
 
 			echo "Starting supervisor service on $node [$target_ip]..."
-			ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "supervisorctl start storm-supervisor storm-logviewer"
+			ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "service supervisor start; sleep 10; supervisorctl start storm-supervisor storm-logviewer"
 
 		elif [ "$role" == "client" ]; then
 
 			# Storm ui can be installed on any machine, not mandatory on nimbus.
 			echo "Starting ui service on client $node [$target_ip]..."
-			ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "supervisorctl start storm-ui"
+			ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "service supervisor start; sleep 10; supervisorctl start storm-ui"
 		fi
 
 	done <<< "$nodes"
@@ -1974,7 +1975,7 @@ stop_storm() {
 		fi
 		
 		echo "Stopping supervisor service on $supervisor_node [$target_ip]..."
-		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "supervisorctl stop storm-supervisor"
+		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "service supervisor start; sleep 10; supervisorctl stop storm-supervisor"
 		
 		sleep 20
 	done <<< "$supervisor_nodes"
@@ -1992,7 +1993,7 @@ stop_storm() {
 		fi
 		
 		echo "Stopping logviewer service on $supervisor_node [$target_ip]..."
-		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "supervisorctl stop storm-logviewer"
+		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "service supervisor start; sleep 10; supervisorctl stop storm-logviewer"
 	done <<< "$supervisor_nodes"
 
 
@@ -2009,7 +2010,7 @@ stop_storm() {
 			target_ip=$public_ip
 		fi
 		echo "Stopping ui service on $client_node [$target_ip]..."
-		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "supervisorctl stop storm-ui"
+		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "service supervisor start; sleep 10; supervisorctl stop storm-ui"
 	done <<< "$client_nodes"
 
 
@@ -2017,7 +2018,7 @@ stop_storm() {
 
 	local nimbus_ipaddr=$(get_nimbus_node_ipaddr)
 	echo "Stopping nimbus service on nimbus node $nimbus_ipaddr..."
-	ssh_command $nimbus_ipaddr $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "supervisorctl stop storm-nimbus"
+	ssh_command $nimbus_ipaddr $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "service supervisor start; sleep 10; supervisorctl stop storm-nimbus"
 	# Wait for nimbus service to shutdown cleanly. Shutdown is quick if there are no topologies running, but
 	# slower if there are because nimbus has to first shutdown the topologies.
 	echo "Waiting for nimbus node services to stop..."

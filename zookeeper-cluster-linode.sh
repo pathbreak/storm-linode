@@ -1332,10 +1332,8 @@ install_software_on_node() {
 
 
 
-	echo "Installing OpenJDK JRE 7 on $1..."
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY apt-get -y install openjdk-7-jre-headless
-
-
+	echo "Installing OpenJDK JRE on $1..."
+	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY apt-get -y install default-jre-headless
 
 	# Install service supervisor package
 	echo "Installing Supervisord on $1..."
@@ -1356,7 +1354,8 @@ install_software_on_node() {
 	# From https://github.com/Supervisor/supervisor/blob/master/supervisor/supervisorctl.py, supervisor update 
 	# first does the same thing as a reread and then restarts changed programs. So despite what many discussions 
 	# say, there's no need to first reread and then update.
-	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY "supervisorctl update"
+	# In Ubuntu 16, it's necessary start supervisor service first.
+	ssh_command $1 $2 $IMAGE_ROOT_SSH_PRIVATE_KEY "service supervisor start; sleep 10; supervisorctl update"
 	
 
 	# Install packages required for iptables firewall configuration.
@@ -1966,7 +1965,7 @@ start_zookeeper() {
 		
 		# When running under supervision, according to https://groups.google.com/d/msg/storm-user/_L6i2JLjQwA/H1LMX2s6JV4J,
 		# it's preferable to use start-foreground (this is configured in zk-supervisord.conf)
-		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "supervisorctl start zookeeper"
+		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "service supervisor start; sleep 10; supervisorctl start zookeeper"
 	done <<< "$ipaddrs"
 }
 
@@ -1994,7 +1993,7 @@ stop_zookeeper() {
 
 		echo "Stopping zookeeper service on $linode_id [$target_ip]..."
 
-		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "supervisorctl stop zookeeper"
+		ssh_command $target_ip $NODE_USERNAME $NODE_ROOT_SSH_PRIVATE_KEY "service supervisor start; sleep 10; supervisorctl stop zookeeper"
 
 
 		# Give some time for each node to become aware of another node stopping

@@ -1,7 +1,8 @@
 #!/usr/bin/python
 
 # Python helper module to extract information from the JSON responses returned by Storm UI REST API
-# See https://github.com/apache/storm/blob/master/STORM-UI-REST-API.md for API documentation
+# See https://github.com/apache/storm/blob/master/docs/STORM-UI-REST-API.md for API documentation
+      
 
 import sys
 import json
